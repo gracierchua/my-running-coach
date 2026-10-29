@@ -67,6 +67,27 @@ const KEY = 'stride-running-coach-v1',
         }
         return { bg: 'rgba(2, 132, 199, 0.25)', border: '#0284c7', color: '#38bdf8' };
       },
+
+      getWorkoutDescription = (type, targetPace, done) => {
+        if (done) return 'Workout completed & logged in history';
+        let lower = String(type || '').toLowerCase();
+        if (lower.includes('recovery')) {
+          return 'Warm-up 1km • Easy relaxed pace, no faster than ' + targetPace + '/km';
+        }
+        if (lower.includes('interval') || lower.includes('speed')) {
+          return 'Warm-up 1.5km at conversational pace • 5x 400m at ' + targetPace + '/km (90s walking rest) • Cool down 1km';
+        }
+        if (lower.includes('tempo') || lower.includes('steady')) {
+          return 'Warm-up 1km • Sustained threshold effort at target pace • Cool down 1km';
+        }
+        if (lower.includes('long')) {
+          return 'Conversational pace throughout • Build aerobic base & endurance';
+        }
+        if (lower.includes('race')) {
+          return 'Tune-up race day • Practice race strategy, pacing & fueling';
+        }
+        return 'Conversational pace or slower, focus on relaxed rhythm & light feet';
+      },
       
       fresh = () => ({ plans: [], runs: [], activePlanId: null });
 
@@ -108,7 +129,6 @@ function predictRaceTimes(runs) {
   return { results, baseline: bestRun };
 }
 
-// PLAN GENERATOR WITH DYNAMIC TARGET-DAY ADJUSTMENT AND ANCHORED MONDAY
 function makePlan(p, userRuns = []) {
   let km = KM[p.distance] || 42.195,
       race = new Date(p.raceDate + 'T12:00:00'),
@@ -297,25 +317,18 @@ function App() {
         return d >= start && d <= n;
       }).reduce((s, r) => s + Number(r.distance), 0);
 
-  // DYNAMIC FILTER & SCHEDULE MERGE:
-  // Week 1 starts on the current week's Monday. Historical runs before Week 1 Monday stay in Run Log only.
-  // Within each week, past unlogged target days are removed if runs were completed on other days.
   const plan = useMemo(() => {
     if (!rawPlan) return null;
     let basePlan = makePlan(rawPlan, state.runs);
     let planStartMonday = basePlan.mondayDate;
 
-    // Filter runs that occurred ON OR AFTER Plan Start Monday
     let planRuns = state.runs.filter(r => r.date >= planStartMonday);
-    
-    // Group logged runs by date
     let runLogMap = new Map();
     planRuns.forEach(r => runLogMap.set(r.date, r));
 
     let finalSchedule = [];
     let curToday = today();
 
-    // Group base schedule by week
     let baseWeeksMap = {};
     basePlan.schedule.forEach(item => {
       let w = item.week || 1;
@@ -326,7 +339,6 @@ function App() {
     Object.entries(baseWeeksMap).forEach(([wNum, plannedSessions]) => {
       let weekNumber = Number(wNum);
       
-      // Compute Monday date for this specific week
       let mondayObj = new Date(planStartMonday + 'T12:00:00');
       mondayObj.setDate(mondayObj.getDate() + (weekNumber - 1) * 7);
       let weekMonStr = mondayObj.toISOString().slice(0, 10);
@@ -335,14 +347,11 @@ function App() {
       sundayObj.setDate(sundayObj.getDate() + 6);
       let weekSunStr = sundayObj.toISOString().slice(0, 10);
 
-      // Get all runs logged during this specific week
       let loggedInWeek = planRuns.filter(r => r.date >= weekMonStr && r.date <= weekSunStr);
-      let loggedDatesInWeek = new Set(loggedInWeek.map(r => r.date));
 
       let weekSessions = [];
       let processedPlannedDates = new Set();
 
-      // Process planned target days
       plannedSessions.forEach(ps => {
         processedPlannedDates.add(ps.date);
         let loggedRun = runLogMap.get(ps.date);
@@ -358,17 +367,12 @@ function App() {
             done: true
           });
         } else {
-          // IF PAST DAY AND UNLOGGED: Only include if we haven't already fulfilled workouts, or show upcoming future ones
-          if (ps.date < curToday) {
-            // Unlogged past target day -> hide so target day isn't treated as rigid fixed obligation
-          } else {
-            // Future upcoming target day -> keep as planned workout
+          if (ps.date >= curToday) {
             weekSessions.push(ps);
           }
         }
       });
 
-      // Insert any runs logged on unscheduled days during this week
       loggedInWeek.forEach(r => {
         if (!processedPlannedDates.has(r.date)) {
           let dist = Number(r.distance);
@@ -852,11 +856,12 @@ function App() {
                         </div>
                       </div>
 
-                      {/* DAILY WORKOUT LIST */}
+                      {/* DAILY WORKOUT LIST WITH SHORT DESCRIPTIONS */}
                       {isExpanded && (
-                        <div style={{ marginTop: '20px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        <div style={{ marginTop: '20px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                           {sessions.map(s => {
                             let badgeStyle = getWorkoutBadgeStyle(s.type);
+                            let description = getWorkoutDescription(s.type, s.pace, s.done);
 
                             return (
                               <div 
@@ -866,7 +871,7 @@ function App() {
                                   alignItems: 'center',
                                   justify: 'space-between',
                                   background: s.done ? 'rgba(255,255,255,0.01)' : 'rgba(255,255,255,0.03)',
-                                  padding: '12px 16px',
+                                  padding: '14px 16px',
                                   borderRadius: '10px',
                                   border: s.done ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(255,255,255,0.1)',
                                   opacity: s.done ? 0.45 : 1,
@@ -874,7 +879,7 @@ function App() {
                                   transition: 'all 0.2s ease'
                                 }}
                               >
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', minWidth: '120px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', minWidth: '110px' }}>
                                   <span style={{ color: s.done ? '#71717a' : '#a1a1aa', fontWeight: 600, fontSize: '0.85rem', width: '36px' }}>
                                     {fmt(s.date, { weekday: 'short' })}
                                   </span>
@@ -883,22 +888,30 @@ function App() {
                                   </span>
                                 </div>
 
-                                <div style={{ flex: 1, padding: '0 16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                  <span style={{
-                                    background: badgeStyle.bg,
-                                    border: `1px solid ${badgeStyle.border}`,
-                                    color: badgeStyle.color,
-                                    padding: '4px 10px',
-                                    borderRadius: '8px',
-                                    fontWeight: 700,
-                                    fontSize: '0.82rem',
-                                    letterSpacing: '0.02em'
-                                  }}>
-                                    {s.type}
-                                  </span>
-                                  <small style={{ color: '#71717a', fontSize: '0.78rem' }}>
-                                    {s.done ? `Logged Pace: ${s.pace}/km` : s.race ? 'Main Goal Event' : `Target Pace: ${s.pace}/km`}
-                                  </small>
+                                {/* WORKOUT TYPE & SHORT DESCRIPTION */}
+                                <div style={{ flex: 1, padding: '0 16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                    <span style={{
+                                      background: badgeStyle.bg,
+                                      border: `1px solid ${badgeStyle.border}`,
+                                      color: badgeStyle.color,
+                                      padding: '3px 10px',
+                                      borderRadius: '8px',
+                                      fontWeight: 700,
+                                      fontSize: '0.82rem',
+                                      letterSpacing: '0.02em'
+                                    }}>
+                                      {s.type}
+                                    </span>
+                                    <small style={{ color: '#71717a', fontSize: '0.78rem' }}>
+                                      {s.done ? `Logged Pace: ${s.pace}/km` : s.race ? 'Main Goal Event' : `Target Pace: ${s.pace}/km`}
+                                    </small>
+                                  </div>
+
+                                  {/* WORKOUT BREAKDOWN DESCRIPTION */}
+                                  <div style={{ color: '#a1a1aa', fontSize: '0.8rem', lineHeight: '1.3' }}>
+                                    {description}
+                                  </div>
                                 </div>
 
                                 <div style={{ paddingRight: '20px', textAlign: 'right' }}>
