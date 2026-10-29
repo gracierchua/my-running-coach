@@ -4,7 +4,7 @@ import {
   Activity, CalendarDays, Check, ChevronDown, ChevronUp, Footprints, 
   LayoutDashboard, Plus, Target, Timer, Trophy, TrendingUp, 
   Settings2, ArrowDownToLine, ArrowUpFromLine, ImagePlus, 
-  Trash2, X, Sparkles, ListChecks, HeartPulse, Pencil, Trash, Zap, CheckCircle2
+  Trash2, X, Sparkles, ListChecks, HeartPulse, Pencil, Trash, Zap, CheckCircle2, Flag
 } from 'lucide-react';
 import './styles.css';
 
@@ -96,7 +96,7 @@ function predictRaceTimes(runs) {
   return { results, baseline: bestRun };
 }
 
-// SCIENTIFIC RUNNING PLAN GENERATOR WITH DYNAMIC MIDWEEK VARIATION
+// PLAN GENERATOR WITH TUNE-UP INTERMEDIATE RACES
 function makePlan(p) {
   let km = KM[p.distance],
       race = new Date(p.raceDate + 'T12:00:00'),
@@ -111,6 +111,9 @@ function makePlan(p) {
   let startWeeklyKm = Math.max(15, Number(p.weeklyKm) || 25);
   let startLong = Math.min(peakLong * 0.45, Math.max(8.0, startWeeklyKm * 0.35));
   let buildWeeks = Math.max(1, weeks - 3);
+
+  // Map intermediate races
+  let interRaces = Array.isArray(p.intermediateRaces) ? p.intermediateRaces : [];
 
   for (let w = 0; w < weeks; w++) {
     let left = weeks - w;
@@ -143,44 +146,58 @@ function makePlan(p) {
       let ds = date.toISOString().slice(0, 10);
       
       if (ds >= today() && ds < p.raceDate) {
-        let isLongRun = i === slots.length - 1;
-        let d = long;
-        let type = 'Long easy run';
+        // Check if an intermediate race matches this date
+        let matchInterRace = interRaces.find(r => r.date === ds);
 
-        if (!isLongRun) {
-          if (i === 0) {
-            // Recovery Run (shortest midweek run)
-            d = Math.round(Math.max(4.0, Math.min(8.0, midweekTotal * 0.24)) * 2) / 2;
-            type = 'Recovery run';
-          } else if (i === 1) {
-            // Focused Tempo Workout (capped quality distance)
-            d = Math.round(Math.max(5.0, Math.min(12.0, midweekTotal * 0.28)) * 2) / 2;
-            type = 'Steady / tempo';
-          } else {
-            // Base-building Midweek Easy Run
-            let usedMidweek = (Math.round(Math.max(4.0, Math.min(8.0, midweekTotal * 0.24)) * 2) / 2) + 
-                              (Math.round(Math.max(5.0, Math.min(12.0, midweekTotal * 0.28)) * 2) / 2);
-            d = Math.round(Math.max(5.0, midweekTotal - usedMidweek) * 2) / 2;
-            type = 'Easy run';
+        if (matchInterRace) {
+          let raceKm = KM[matchInterRace.distance] || Number(matchInterRace.distance) || 10;
+          schedule.push({
+            id: uid(),
+            date: ds,
+            week: w + 1,
+            km: raceKm,
+            type: `🏆 TUNE-UP RACE (${matchInterRace.name || matchInterRace.distance})`,
+            pace: pace(gp * 0.95),
+            done: false,
+            intermediate: true
+          });
+        } else {
+          let isLongRun = i === slots.length - 1;
+          let d = long;
+          let type = 'Long easy run';
+
+          if (!isLongRun) {
+            if (i === 0) {
+              d = Math.round(Math.max(4.0, Math.min(8.0, midweekTotal * 0.24)) * 2) / 2;
+              type = 'Recovery run';
+            } else if (i === 1) {
+              d = Math.round(Math.max(5.0, Math.min(12.0, midweekTotal * 0.28)) * 2) / 2;
+              type = 'Steady / tempo';
+            } else {
+              let usedMidweek = (Math.round(Math.max(4.0, Math.min(8.0, midweekTotal * 0.24)) * 2) / 2) + 
+                                (Math.round(Math.max(5.0, Math.min(12.0, midweekTotal * 0.28)) * 2) / 2);
+              d = Math.round(Math.max(5.0, midweekTotal - usedMidweek) * 2) / 2;
+              type = 'Easy run';
+            }
           }
+
+          if (left === 1 && !isLongRun) type = 'Easy shakeout';
+
+          schedule.push({
+            id: uid(),
+            date: ds,
+            week: w + 1,
+            km: d,
+            type,
+            pace: pace(gp * (type.includes('tempo') ? 0.96 : type.includes('Recovery') ? 1.18 : 1.12)),
+            done: false
+          });
         }
-
-        if (left === 1 && !isLongRun) type = 'Easy shakeout';
-
-        schedule.push({
-          id: uid(),
-          date: ds,
-          week: w + 1,
-          km: d,
-          type,
-          pace: pace(gp * (type.includes('tempo') ? 0.96 : type.includes('Recovery') ? 1.18 : 1.12)),
-          done: false
-        });
       }
     });
   }
 
-  schedule.push({ id: uid(), date: p.raceDate, week: weeks, km, type: 'RACE DAY', pace: pace(gp), done: false, race: true });
+  schedule.push({ id: uid(), date: p.raceDate, week: weeks, km, type: 'GOAL RACE DAY', pace: pace(gp), done: false, race: true });
   return { ...p, schedule, weeks, goalPace: gp };
 }
 
@@ -192,7 +209,18 @@ function App() {
         [notice, N] = useState(''),
         [busy, B] = useState(false),
         [expandedWeeks, setExpandedWeeks] = useState({ 1: true }),
-        [form, F] = useState({ name: '', distance: 'Marathon', goalTime: '4:30:00', raceDate: '', weeklyKm: '30', daysPerWeek: '4' }),
+        
+        // Form states including intermediate tune-up races
+        [form, F] = useState({ 
+          name: '', 
+          distance: 'Marathon', 
+          goalTime: '4:30:00', 
+          raceDate: '', 
+          weeklyKm: '30', 
+          daysPerWeek: '4',
+          intermediateRaces: []
+        }),
+        [newInterRace, setNewInterRace] = useState({ name: '', distance: '10K', date: '' }),
         [run, R] = useState({ date: today(), distance: '', duration: '', pace: '', notes: '' });
 
   useEffect(() => { localStorage.setItem(KEY, JSON.stringify(state)); }, [state]);
@@ -238,7 +266,16 @@ function App() {
   }
 
   function openNewPlan() {
-    F({ name: '', distance: 'Marathon', goalTime: '4:30:00', raceDate: '', weeklyKm: '30', daysPerWeek: '4' });
+    F({ 
+      name: '', 
+      distance: 'Marathon', 
+      goalTime: '4:30:00', 
+      raceDate: '', 
+      weeklyKm: '30', 
+      daysPerWeek: '4',
+      intermediateRaces: []
+    });
+    setNewInterRace({ name: '', distance: '10K', date: '' });
     M('plan');
   }
 
@@ -250,9 +287,31 @@ function App() {
       goalTime: plan.goalTime || '4:30:00',
       raceDate: plan.raceDate || '',
       weeklyKm: String(plan.weeklyKm || '30'),
-      daysPerWeek: String(plan.daysPerWeek || '4')
+      daysPerWeek: String(plan.daysPerWeek || '4'),
+      intermediateRaces: plan.intermediateRaces || []
     });
+    setNewInterRace({ name: '', distance: '10K', date: '' });
     M('editPlan');
+  }
+
+  function addIntermediateRace() {
+    if (!newInterRace.date) {
+      N('Select a valid date for your intermediate race.');
+      return;
+    }
+    F(prev => ({
+      ...prev,
+      intermediateRaces: [...(prev.intermediateRaces || []), { ...newInterRace, id: uid() }]
+    }));
+    setNewInterRace({ name: '', distance: '10K', date: '' });
+    N('Intermediate race added.');
+  }
+
+  function removeIntermediateRace(id) {
+    F(prev => ({
+      ...prev,
+      intermediateRaces: (prev.intermediateRaces || []).filter(r => r.id !== id)
+    }));
   }
 
   function savePlan(e) {
@@ -546,7 +605,7 @@ function App() {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                   <div><small>Target pace</small><b>{pace(plan.goalPace)} <em>/km</em></b></div>
-                  <button className="btn secondary" onClick={openEditPlan} style={{ gap: '6px' }}><Pencil size={15}/> Edit</button>
+                  <button className="btn secondary" onClick={openEditPlan} style={{ gap: '6px' }}><Pencil size={15}/> Edit / Add Races</button>
                   <button className="btn secondary" onClick={() => deletePlan()} style={{ gap: '6px', color: '#ef4444' }}><Trash size={15}/> Delete</button>
                 </div>
               </div>
@@ -592,7 +651,6 @@ function App() {
                             )}
                           </div>
 
-                          {/* WORKOUTS & DISTANCE SUMMARY BARS */}
                           <div style={{ display: 'flex', gap: '24px', marginTop: '10px', color: '#a1a1aa', fontSize: '0.85rem' }}>
                             <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                               <Footprints size={15} style={{ color: '#38bdf8' }}/> 
@@ -612,7 +670,7 @@ function App() {
                         </div>
                       </div>
 
-                      {/* DAILY WORKOUT LIST (WHEN EXPANDED) */}
+                      {/* DAILY WORKOUT LIST */}
                       {isExpanded && (
                         <div style={{ marginTop: '20px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                           {sessions.map(s => {
@@ -654,7 +712,7 @@ function App() {
                                     {s.type}
                                   </span>
                                   <small style={{ color: '#71717a', fontSize: '0.78rem' }}>
-                                    {s.race ? 'Race event day' : `Target Pace: ${s.pace}/km`}
+                                    {s.race ? 'Main Goal Event' : `Target Pace: ${s.pace}/km`}
                                   </small>
                                 </div>
 
@@ -776,6 +834,7 @@ function App() {
         <footer><span>STRIDE © {new Date().getFullYear()}</span><span>Made for the miles ahead <b>✳</b></span></footer>
       </main>
 
+      {/* PLAN FORM MODAL WITH INTERMEDIATE RACES */}
       {modal && (
         <div className="backdrop" onMouseDown={e => e.target === e.currentTarget && M('')}>
           <div className="modal">
@@ -798,7 +857,41 @@ function App() {
                   <label>Current weekly distance (km)<input type="number" min="0" max="200" required value={form.weeklyKm} onChange={e => F({ ...form, weeklyKm: e.target.value })}/></label>
                   <label>Runs per week<select value={form.daysPerWeek} onChange={e => F({ ...form, daysPerWeek: e.target.value })}>{[3, 4, 5, 6].map(n => <option key={n}>{n}</option>)}</select></label>
                 </div>
-                <div className="formhint"><Sparkles size={16}/>This is a suggested starting point, not a substitute for a qualified coach or medical advice.</div>
+
+                {/* INTERMEDIATE / TUNE-UP RACES BUILDER */}
+                <div style={{ marginTop: '16px', padding: '16px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <label style={{ fontWeight: 700, color: '#ccff00', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Flag size={16}/> Intermediate Tune-Up Races (Optional)
+                  </label>
+                  <small style={{ color: '#a1a1aa', display: 'block', marginBottom: '12px' }}>
+                    Add 10K or 21K races scheduled during your training block. Stride will adjust that week's schedule around it.
+                  </small>
+
+                  {(form.intermediateRaces || []).map(r => (
+                    <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '8px 12px', borderRadius: '8px', marginBottom: '8px' }}>
+                      <div>
+                        <b style={{ color: '#f4f4f5' }}>{r.name || 'Tune-Up Race'} ({r.distance})</b>
+                        <small style={{ display: 'block', color: '#a1a1aa' }}>{fmt(r.date)}</small>
+                      </div>
+                      <button type="button" onClick={() => removeIntermediateRace(r.id)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }}>
+                        <Trash size={14}/>
+                      </button>
+                    </div>
+                  ))}
+
+                  <div className="formrow" style={{ marginTop: '12px' }}>
+                    <input placeholder="Race Name (e.g. Standard Chartered 10K)" value={newInterRace.name} onChange={e => setNewInterRace({ ...newInterRace, name: e.target.value })} />
+                    <select value={newInterRace.distance} onChange={e => setNewInterRace({ ...newInterRace, distance: e.target.value })}>
+                      {Object.keys(KM).map(k => <option key={k}>{k}</option>)}
+                    </select>
+                    <input type="date" min={today()} value={newInterRace.date} onChange={e => setNewInterRace({ ...newInterRace, date: e.target.value })} />
+                  </div>
+                  <button type="button" className="btn secondary full" onClick={addIntermediateRace} style={{ marginTop: '8px', gap: '6px' }}>
+                    <Plus size={15}/> Add Tune-Up Race
+                  </button>
+                </div>
+
+                <div className="formhint" style={{ marginTop: '12px' }}><Sparkles size={16}/>This is a suggested starting point, not a substitute for a qualified coach or medical advice.</div>
                 <div className="modalactions">
                   <button type="button" className="btn secondary" onClick={() => M('')}>Cancel</button>
                   <button className="btn primary"><Sparkles size={16}/> {modal === 'editPlan' ? 'Update Plan' : 'Build my plan'}</button>
