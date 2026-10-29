@@ -108,8 +108,8 @@ function predictRaceTimes(runs) {
   return { results, baseline: bestRun };
 }
 
-// GENERATOR WITH AUTOMATIC LOGGED RUN DATE SYNC
-function makePlan(p, userRuns = [], existingSchedule = []) {
+// BASE SCHEDULE CALCULATOR
+function makePlan(p, userRuns = []) {
   let km = KM[p.distance] || 42.195,
       race = new Date(p.raceDate + 'T12:00:00'),
       now = new Date(today() + 'T12:00:00'),
@@ -120,24 +120,11 @@ function makePlan(p, userRuns = [], existingSchedule = []) {
   monday.setDate(monday.getDate() + diffToMonday);
 
   let weeks = Math.max(4, Math.min(24, Math.ceil((race - monday) / 604800000))),
-      
       selectedSlots = Array.isArray(p.runDays) && p.runDays.length > 0 
         ? [...p.runDays].sort((a, b) => a - b)
         : [1, 3, 5, 6],
-      
       gp = parseTime(p.goalTime) / km,
       schedule = [];
-
-  // Track dates with logged runs from user's history
-  let loggedDates = new Set(userRuns.map(r => r.date));
-
-  // Also retain manual checkbox states from previous schedule if available
-  let doneStateMap = new Map();
-  if (Array.isArray(existingSchedule)) {
-    existingSchedule.forEach(s => {
-      if (s.date && s.done) doneStateMap.set(s.date, true);
-    });
-  }
 
   let validLogged = userRuns.filter(r => Number(r.distance) >= 3 && parseTime(r.duration) > 0);
   let calibratedGP = gp;
@@ -185,7 +172,6 @@ function makePlan(p, userRuns = [], existingSchedule = []) {
       let ds = date.toISOString().slice(0, 10);
       
       if (ds < p.raceDate) {
-        let isDone = loggedDates.has(ds) || doneStateMap.get(ds) || false;
         let matchInterRace = interRaces.find(r => r.date === ds);
 
         if (matchInterRace) {
@@ -197,7 +183,7 @@ function makePlan(p, userRuns = [], existingSchedule = []) {
             km: raceKm,
             type: `🏆 TUNE-UP RACE (${matchInterRace.name || matchInterRace.distance})`,
             pace: pace(calibratedGP * 0.95),
-            done: isDone,
+            done: false,
             intermediate: true
           });
           insertedDates.add(ds);
@@ -244,7 +230,7 @@ function makePlan(p, userRuns = [], existingSchedule = []) {
             km: d,
             type,
             pace: sessionPace,
-            done: isDone
+            done: false
           });
           insertedDates.add(ds);
         }
@@ -252,7 +238,6 @@ function makePlan(p, userRuns = [], existingSchedule = []) {
     });
   }
 
-  // GUARANTEE TUNE-UP RACES INJECTION
   interRaces.forEach(r => {
     if (r.date && r.date < p.raceDate && !insertedDates.has(r.date)) {
       let rDate = new Date(r.date + 'T12:00:00');
@@ -265,7 +250,7 @@ function makePlan(p, userRuns = [], existingSchedule = []) {
         km: raceKm,
         type: `🏆 TUNE-UP RACE (${r.name || r.distance})`,
         pace: pace(calibratedGP * 0.95),
-        done: loggedDates.has(r.date) || doneStateMap.get(r.date) || false,
+        done: false,
         intermediate: true
       });
     }
@@ -278,13 +263,13 @@ function makePlan(p, userRuns = [], existingSchedule = []) {
     km, 
     type: 'GOAL RACE DAY', 
     pace: pace(gp), 
-    done: loggedDates.has(p.raceDate) || doneStateMap.get(p.raceDate) || false, 
+    done: false, 
     race: true 
   });
 
   schedule.sort((a, b) => a.date.localeCompare(b.date));
 
-  return { ...p, schedule, weeks, goalPace: gp };
+  return { ...p, schedule, weeks, goalPace: gp, mondayDate: monday.toISOString().slice(0, 10) };
 }
 
 function App() {
@@ -316,7 +301,7 @@ function App() {
     }
   }, [notice]);
 
-  let plan = state.plans.find(p => p.id === state.activePlanId) || state.plans[0],
+  let rawPlan = state.plans.find(p => p.id === state.activePlanId) || state.plans[0],
       runs = [...state.runs].sort((a, b) => b.date.localeCompare(a.date)),
       total = state.runs.reduce((s, r) => s + Number(r.distance), 0),
       
@@ -330,13 +315,63 @@ function App() {
         start.setDate(n.getDate() - ((n.getDay() + 6) % 7));
         start.setHours(0, 0, 0, 0);
         return d >= start && d <= n;
-      }).reduce((s, r) => s + Number(r.distance), 0),
-      
-      // Calculate done by checking schedule done OR matching run log date
-      loggedDatesSet = useMemo(() => new Set(state.runs.map(r => r.date)), [state.runs]),
-      
-      done = plan?.schedule?.filter(s => s.done || loggedDatesSet.has(s.date)).length || 0,
-      upcoming = plan?.schedule?.filter(s => !(s.done || loggedDatesSet.has(s.date)) && s.date >= today()).slice(0, 4) || [],
+      }).reduce((s, r) => s + Number(r.distance), 0);
+
+  // FULLY DYNAMIC: OVERRIDE TARGET PLAN WITH ACTUAL RUN LOG ENTRIES FOR ANY WEEK
+  const plan = useMemo(() => {
+    if (!rawPlan) return null;
+    let basePlan = makePlan(rawPlan, state.runs);
+    let runLogMap = new Map();
+    state.runs.forEach(r => runLogMap.set(r.date, r));
+
+    let mondayObj = new Date(basePlan.mondayDate + 'T12:00:00');
+    let insertedDates = new Set();
+
+    let mergedSchedule = basePlan.schedule.map(session => {
+      insertedDates.add(session.date);
+      let logged = runLogMap.get(session.date);
+      if (logged) {
+        let loggedDist = Number(logged.distance);
+        let loggedPaceVal = logged.pace || pace(parseTime(logged.duration) / loggedDist);
+        return {
+          ...session,
+          km: loggedDist,
+          pace: loggedPaceVal,
+          type: logged.notes || session.type,
+          done: true,
+          isOverride: true
+        };
+      }
+      return session;
+    });
+
+    // DYNAMICALLY INSERT UNPLANNED LOGGED RUNS INTO THEIR RESPECTIVE WEEK CARDS
+    state.runs.forEach(r => {
+      if (r.date && r.date < basePlan.raceDate && !insertedDates.has(r.date)) {
+        let rDate = new Date(r.date + 'T12:00:00');
+        let wNum = Math.max(1, Math.ceil((rDate - mondayObj) / 604800000));
+        let dist = Number(r.distance);
+        let runPace = r.pace || pace(parseTime(r.duration) / dist);
+        mergedSchedule.push({
+          id: uid(),
+          date: r.date,
+          week: wNum,
+          km: dist,
+          type: r.notes || 'Logged run',
+          pace: runPace,
+          done: true,
+          isOverride: true
+        });
+        insertedDates.add(r.date);
+      }
+    });
+
+    mergedSchedule.sort((a, b) => a.date.localeCompare(b.date));
+    return { ...basePlan, schedule: mergedSchedule };
+  }, [rawPlan, state.runs]);
+
+  let done = plan?.schedule?.filter(s => s.done).length || 0,
+      upcoming = plan?.schedule?.filter(s => !s.done && s.date >= today()).slice(0, 4) || [],
       predictions = useMemo(() => predictRaceTimes(state.runs), [state.runs]);
 
   const weeksGrouped = useMemo(() => {
@@ -344,13 +379,10 @@ function App() {
     return plan.schedule.reduce((acc, item) => {
       let w = item.week || 1;
       if (!acc[w]) acc[w] = [];
-      
-      // Override done flag dynamically if present in run log
-      let isCompleted = item.done || loggedDatesSet.has(item.date);
-      acc[w].push({ ...item, done: isCompleted });
+      acc[w].push(item);
       return acc;
     }, {});
-  }, [plan, loggedDatesSet]);
+  }, [plan]);
 
   function toggleWeekExpand(wNum) {
     setExpandedWeeks(prev => ({ ...prev, [wNum]: !prev[wNum] }));
@@ -423,11 +455,11 @@ function App() {
       return;
     }
 
-    if (modal === 'editPlan' && plan) {
-      let updated = makePlan({ ...plan, ...form }, state.runs, plan.schedule);
+    if (modal === 'editPlan' && rawPlan) {
+      let updated = makePlan({ ...rawPlan, ...form }, state.runs);
       S(s => ({
         ...s,
-        plans: s.plans.map(p => p.id === plan.id ? updated : p)
+        plans: s.plans.map(p => p.id === rawPlan.id ? updated : p)
       }));
       N('Plan updated successfully.');
     } else {
@@ -442,7 +474,7 @@ function App() {
   function deletePlan(idToDelete) {
     let targetId = idToDelete || plan?.id;
     if (!targetId) return;
-    let targetPlan = state.plans.find(p => p.id !== targetId);
+    let targetPlan = state.plans.find(p => p.id === targetId);
 
     if (confirm(`Are you sure you want to delete "${targetPlan?.name || 'this plan'}"?`)) {
       S(s => {
@@ -457,24 +489,16 @@ function App() {
     }
   }
 
-  // TOGGLE WITH BIDIRECTIONAL LOG SYNC
   function toggle(id) {
     if (!plan) return;
     let session = plan.schedule.find(x => x.id === id);
     if (!session) return;
 
-    let isCurrentlyDone = session.done || loggedDatesSet.has(session.date);
-    let newDoneState = !isCurrentlyDone;
+    let newDoneState = !session.done;
 
     S(s => {
-      let updatedPlans = s.plans.map(p => p.id !== plan.id ? p : {
-        ...p,
-        schedule: p.schedule.map(x => x.id === id ? { ...x, done: newDoneState } : x)
-      });
-
       let updatedRuns = [...s.runs];
       if (newDoneState) {
-        // Auto-log run if checking as done and not yet in run log
         if (!updatedRuns.some(r => r.date === session.date)) {
           updatedRuns.unshift({
             id: uid(),
@@ -486,13 +510,11 @@ function App() {
           });
         }
       } else {
-        // Remove from run log if manually unchecked
         updatedRuns = updatedRuns.filter(r => r.date !== session.date);
       }
 
       return {
         ...s,
-        plans: updatedPlans,
         runs: updatedRuns
       };
     });
@@ -521,17 +543,10 @@ function App() {
       notes: run.notes
     };
 
-    S(s => {
-      let updatedRuns = editing ? s.runs.map(r => r.id === editing ? obj : r) : [obj, ...s.runs];
-      
-      // Auto-sync plan schedule items on that date to done: true
-      let updatedPlans = s.plans.map(p => ({
-        ...p,
-        schedule: p.schedule.map(x => x.date === obj.date ? { ...x, done: true } : x)
-      }));
-
-      return { ...s, runs: updatedRuns, plans: updatedPlans };
-    });
+    S(s => ({
+      ...s,
+      runs: editing ? s.runs.map(r => r.id === editing ? obj : r) : [obj, ...s.runs]
+    }));
 
     M('');
     N('Run saved.');
@@ -860,7 +875,7 @@ function App() {
                                     {s.type}
                                   </span>
                                   <small style={{ color: '#71717a', fontSize: '0.78rem' }}>
-                                    {s.race ? 'Main Goal Event' : `Target Pace: ${s.pace}/km`}
+                                    {s.done ? `Logged Pace: ${s.pace}/km` : s.race ? 'Main Goal Event' : `Target Pace: ${s.pace}/km`}
                                   </small>
                                 </div>
 
