@@ -39,7 +39,6 @@ const KEY = 'stride-running-coach-v1',
         return `${m}:${String(s).padStart(2, '0')}`;
       },
 
-      // Color mapper for workout types
       getWorkoutBadgeStyle = type => {
         let lower = String(type || '').toLowerCase();
         if (lower.includes('race')) {
@@ -51,7 +50,9 @@ const KEY = 'stride-running-coach-v1',
         if (lower.includes('tempo') || lower.includes('steady') || lower.includes('interval')) {
           return { bg: 'rgba(217, 119, 6, 0.25)', border: '#f59e0b', color: '#fbbf24' };
         }
-        // Default Easy Run / Shakeout
+        if (lower.includes('recovery')) {
+          return { bg: 'rgba(16, 185, 129, 0.25)', border: '#10b981', color: '#34d399' };
+        }
         return { bg: 'rgba(2, 132, 199, 0.25)', border: '#0284c7', color: '#38bdf8' };
       },
       
@@ -95,6 +96,7 @@ function predictRaceTimes(runs) {
   return { results, baseline: bestRun };
 }
 
+// SCIENTIFIC RUNNING PLAN GENERATOR WITH DYNAMIC MIDWEEK VARIATION
 function makePlan(p) {
   let km = KM[p.distance],
       race = new Date(p.raceDate + 'T12:00:00'),
@@ -129,10 +131,11 @@ function makePlan(p) {
       let progress = w / Math.max(1, buildWeeks - 1);
       long = startLong + (peakLong - startLong) * Math.min(1.0, progress);
       if (deload) long *= 0.78;
-      weekKm = Math.max(startWeeklyKm, long / 0.35);
+      weekKm = Math.max(startWeeklyKm, long / 0.38);
     }
 
     long = Math.round(long * 2) / 2;
+    let midweekTotal = Math.max(10.0, weekKm - long);
 
     slots.forEach((day, i) => {
       let date = new Date(now);
@@ -141,17 +144,36 @@ function makePlan(p) {
       
       if (ds >= today() && ds < p.raceDate) {
         let isLongRun = i === slots.length - 1;
-        let d = isLongRun ? long : Math.max(3.0, Math.round(((weekKm - long) / (slots.length - 1)) * 2) / 2);
-        let type = isLongRun ? 'Long easy run' : i === 1 ? 'Steady / tempo' : 'Easy run';
-        if (left === 1) type = 'Easy shakeout';
-        
+        let d = long;
+        let type = 'Long easy run';
+
+        if (!isLongRun) {
+          if (i === 0) {
+            // Recovery Run (shortest midweek run)
+            d = Math.round(Math.max(4.0, Math.min(8.0, midweekTotal * 0.24)) * 2) / 2;
+            type = 'Recovery run';
+          } else if (i === 1) {
+            // Focused Tempo Workout (capped quality distance)
+            d = Math.round(Math.max(5.0, Math.min(12.0, midweekTotal * 0.28)) * 2) / 2;
+            type = 'Steady / tempo';
+          } else {
+            // Base-building Midweek Easy Run
+            let usedMidweek = (Math.round(Math.max(4.0, Math.min(8.0, midweekTotal * 0.24)) * 2) / 2) + 
+                              (Math.round(Math.max(5.0, Math.min(12.0, midweekTotal * 0.28)) * 2) / 2);
+            d = Math.round(Math.max(5.0, midweekTotal - usedMidweek) * 2) / 2;
+            type = 'Easy run';
+          }
+        }
+
+        if (left === 1 && !isLongRun) type = 'Easy shakeout';
+
         schedule.push({
           id: uid(),
           date: ds,
           week: w + 1,
           km: d,
           type,
-          pace: pace(gp * (type.includes('tempo') ? 0.96 : 1.12)),
+          pace: pace(gp * (type.includes('tempo') ? 0.96 : type.includes('Recovery') ? 1.18 : 1.12)),
           done: false
         });
       }
