@@ -19,6 +19,9 @@ const KEY = 'stride-running-coach-v1',
         { label: 'Sat', val: 5 },
         { label: 'Sun', val: 6 }
       ],
+      // Long run mileage progression from blueprint (Converted Miles to KM)
+      LONG_RUN_PROGRESSION_KM = [6.4, 9.7, 12.9, 16.1, 20.9, 25.7, 32.2],
+
       today = () => new Date().toISOString().slice(0, 10),
       uid = () => Math.random().toString(36).slice(2, 10),
       fmt = (d, o = { day: 'numeric', month: 'short' }) => d ? new Date(d + 'T12:00:00').toLocaleDateString('en-SG', o) : '—',
@@ -72,21 +75,21 @@ const KEY = 'stride-running-coach-v1',
         if (done) return 'Workout completed & logged in history';
         let lower = String(type || '').toLowerCase();
         if (lower.includes('recovery')) {
-          return 'Warm-up 1km • Easy relaxed pace, no faster than ' + targetPace + '/km';
+          return 'Easy 3-5 mile effort • Keep pace light, no faster than ' + targetPace + '/km';
         }
         if (lower.includes('interval') || lower.includes('speed')) {
-          return 'Warm-up 1.5km at conversational pace • 5x 400m at ' + targetPace + '/km (90s walking rest) • Cool down 1km';
+          return 'Warm-up 1.5km • 5x 400m at ' + targetPace + '/km (90s walking rest) • Cool down 1km';
         }
         if (lower.includes('tempo') || lower.includes('steady')) {
-          return 'Warm-up 1km • Sustained threshold effort at target pace • Cool down 1km';
+          return 'Sustained 3-6 miles at conversational tempo pace • Focus on rhythm';
         }
         if (lower.includes('long')) {
-          return 'Conversational pace throughout • Build aerobic base & endurance';
+          return 'Weekly Progression Long Run • Maintain steady aerobic pace throughout';
         }
         if (lower.includes('race')) {
           return 'Tune-up race day • Practice race strategy, pacing & fueling';
         }
-        return 'Conversational pace or slower, focus on relaxed rhythm & light feet';
+        return '3-5 miles comfortable pace • Conversational effort throughout';
       },
       
       fresh = () => ({ plans: [], runs: [], activePlanId: null });
@@ -129,6 +132,7 @@ function predictRaceTimes(runs) {
   return { results, baseline: bestRun };
 }
 
+// AI PLAN GENERATOR USING PROGRESSION BLUEPRINT
 function makePlan(p, userRuns = []) {
   let km = KM[p.distance] || 42.195,
       race = new Date(p.raceDate + 'T12:00:00'),
@@ -154,37 +158,29 @@ function makePlan(p, userRuns = []) {
     calibratedGP = (gp * 0.70) + (recentPaceSec * 0.30);
   }
 
-  let peakLong = km >= 40 ? 32.0 : km >= 20 ? 20.0 : km >= 9 ? 13.0 : 6.0;
-  let startWeeklyKm = Math.max(20, Number(p.weeklyKm) || 30);
-  let startLong = Math.min(peakLong * 0.45, Math.max(8.0, startWeeklyKm * 0.35));
-  let buildWeeks = Math.max(1, weeks - 3);
-
   let interRaces = Array.isArray(p.intermediateRaces) ? p.intermediateRaces : [];
 
   for (let w = 0; w < weeks; w++) {
     let left = weeks - w;
     let deload = (w + 1) % 4 === 0;
-    let long = startLong;
-    let weekKm = startWeeklyKm;
 
-    if (left === 1) {
-      long = km >= 40 ? 8.0 : 5.0;
-      weekKm = startWeeklyKm * 0.45;
-    } else if (left === 2) {
-      long = km >= 40 ? 18.0 : 10.0;
-      weekKm = startWeeklyKm * 0.65;
-    } else if (left === 3) {
-      long = km >= 40 ? 28.0 : 14.0;
-      weekKm = startWeeklyKm * 0.95;
-    } else {
-      let progress = w / Math.max(1, buildWeeks - 1);
-      long = startLong + (peakLong - startLong) * Math.min(1.0, progress);
-      if (deload) long *= 0.78;
-      weekKm = Math.max(startWeeklyKm, long / 0.38);
+    // Progression Plan mapping based on blueprint
+    let progIndex = Math.min(w, LONG_RUN_PROGRESSION_KM.length - 1);
+    let long = LONG_RUN_PROGRESSION_KM[progIndex];
+
+    if (km < 21) {
+      long = Math.min(long, km * 0.85);
     }
 
-    long = Math.round(long * 2) / 2;
-    let midweekTotal = Math.max(10.0, weekKm - long);
+    if (left === 1) {
+      long = km >= 40 ? 8.0 : 5.0; // Taper final week
+    } else if (left === 2) {
+      long = km >= 40 ? 16.1 : 10.0; // Taper week 2
+    } else if (deload && left > 3) {
+      long = Math.round(long * 0.75 * 10) / 10;
+    }
+
+    long = Math.round(long * 10) / 10;
 
     selectedSlots.forEach((dayOffset, i) => {
       let date = new Date(monday);
@@ -209,31 +205,22 @@ function makePlan(p, userRuns = []) {
         } else {
           let isLongRun = i === selectedSlots.length - 1;
           let d = long;
-          let type = 'Long easy run';
+          let type = 'Long Run';
           let sessionPace = pace(calibratedGP * 1.18);
 
           if (!isLongRun) {
             if (i === 0) {
-              d = Math.round(Math.max(4.0, Math.min(8.0, midweekTotal * 0.22)) * 2) / 2;
-              type = 'Recovery run';
-              sessionPace = pace(calibratedGP * 1.25);
+              d = 5.0; // Tue Easy Run: 3-5 miles (~5-8km)
+              type = 'Easy Run';
+              sessionPace = pace(calibratedGP * 1.20);
             } else if (i === 1) {
-              let isIntervalWeek = w % 2 === 1;
-              if (isIntervalWeek) {
-                d = Math.round(Math.max(6.0, Math.min(10.0, midweekTotal * 0.26)) * 2) / 2;
-                type = 'Intervals (Speed)';
-                sessionPace = pace(calibratedGP * 0.88);
-              } else {
-                d = Math.round(Math.max(6.0, Math.min(12.0, midweekTotal * 0.28)) * 2) / 2;
-                type = 'Steady / tempo';
-                sessionPace = pace(calibratedGP * 0.96);
-              }
+              d = 6.5; // Thu Easy/Tempo Run: 3-6 miles (~5-9.6km)
+              type = 'Easy / Tempo';
+              sessionPace = pace(calibratedGP * 1.05);
             } else {
-              let usedMidweek = (Math.round(Math.max(4.0, Math.min(8.0, midweekTotal * 0.22)) * 2) / 2) + 
-                                (Math.round(Math.max(6.0, Math.min(12.0, midweekTotal * 0.28)) * 2) / 2);
-              d = Math.round(Math.max(5.0, midweekTotal - usedMidweek) * 2) / 2;
-              type = 'Easy run';
-              sessionPace = pace(calibratedGP * 1.18);
+              d = 4.8; // Sun Recovery/Easy: 2-4 miles (~3.2-6.4km)
+              type = 'Recovery / Easy';
+              sessionPace = pace(calibratedGP * 1.25);
             }
           }
 
