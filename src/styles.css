@@ -928,3 +928,22 @@ footer b {
     grid-template-columns: 1fr;
   }
 }
+
+
+@media (max-width: 768px) {
+  .desktop-run-table {
+    display: none !important;
+  }
+  .mobile-run-cards {
+    display: flex !important;
+  }
+}
+
+@media (min-width: 769px) {
+  .desktop-run-table {
+    display: block !important;
+  }
+  .mobile-run-cards {
+    display: none !important;
+  }
+}
