@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
-  Activity, CalendarDays, Check, ChevronDown, Footprints, 
+  Activity, CalendarDays, Check, ChevronDown, ChevronUp, Footprints, 
   LayoutDashboard, Plus, Target, Timer, Trophy, TrendingUp, 
   Settings2, ArrowDownToLine, ArrowUpFromLine, ImagePlus, 
-  Trash2, X, Sparkles, ListChecks, HeartPulse, Pencil, Trash, Zap
+  Trash2, X, Sparkles, ListChecks, HeartPulse, Pencil, Trash, Zap, CheckCircle2
 } from 'lucide-react';
 import './styles.css';
 
@@ -49,7 +49,6 @@ function load() {
   }
 }
 
-// Riegel Race Predictor Formula
 function predictRaceTimes(runs) {
   if (!runs || runs.length === 0) return null;
   let validRuns = runs.filter(r => Number(r.distance) >= 3 && parseTime(r.duration) > 0);
@@ -80,7 +79,6 @@ function predictRaceTimes(runs) {
   return { results, baseline: bestRun };
 }
 
-// REALISTIC MARATHON / HALF MARATHON GENERATOR
 function makePlan(p) {
   let km = KM[p.distance],
       race = new Date(p.raceDate + 'T12:00:00'),
@@ -91,12 +89,10 @@ function makePlan(p) {
       gp = parseTime(p.goalTime) / km,
       schedule = [];
 
-  // Determine Peak Long Run target based on race distance
   let peakLong = km >= 40 ? 34.0 : km >= 20 ? 20.0 : km >= 9 ? 13.0 : 6.0;
   let startWeeklyKm = Math.max(15, Number(p.weeklyKm) || 25);
   let startLong = Math.min(peakLong * 0.45, Math.max(8.0, startWeeklyKm * 0.35));
-
-  let buildWeeks = Math.max(1, weeks - 3); // Reserve last 3 weeks for taper
+  let buildWeeks = Math.max(1, weeks - 3);
 
   for (let w = 0; w < weeks; w++) {
     let left = weeks - w;
@@ -105,19 +101,15 @@ function makePlan(p) {
     let weekKm = startWeeklyKm;
 
     if (left === 1) {
-      // Race week shakeout
       long = km >= 40 ? 8.0 : 5.0;
       weekKm = startWeeklyKm * 0.45;
     } else if (left === 2) {
-      // Final taper week
       long = km >= 40 ? 18.0 : 10.0;
       weekKm = startWeeklyKm * 0.65;
     } else if (left === 3) {
-      // First taper week
       long = km >= 40 ? 26.0 : 14.0;
       weekKm = startWeeklyKm * 0.80;
     } else {
-      // Progressive build-up
       let progress = w / Math.max(1, buildWeeks - 1);
       long = startLong + (peakLong - startLong) * Math.min(1.0, progress);
       if (deload) long *= 0.78;
@@ -161,6 +153,7 @@ function App() {
         [editing, E] = useState(null),
         [notice, N] = useState(''),
         [busy, B] = useState(false),
+        [expandedWeeks, setExpandedWeeks] = useState({ 1: true }),
         [form, F] = useState({ name: '', distance: 'Marathon', goalTime: '4:30:00', raceDate: '', weeklyKm: '30', daysPerWeek: '4' }),
         [run, R] = useState({ date: today(), distance: '', duration: '', pace: '', notes: '' });
 
@@ -191,6 +184,21 @@ function App() {
       done = plan?.schedule?.filter(s => s.done).length || 0,
       upcoming = plan?.schedule?.filter(s => !s.done && s.date >= today()).slice(0, 4) || [],
       predictions = useMemo(() => predictRaceTimes(state.runs), [state.runs]);
+
+  // Group plan schedule by weeks
+  const weeksGrouped = useMemo(() => {
+    if (!plan?.schedule) return {};
+    return plan.schedule.reduce((acc, item) => {
+      let w = item.week || 1;
+      if (!acc[w]) acc[w] = [];
+      acc[w].push(item);
+      return acc;
+    }, {});
+  }, [plan]);
+
+  function toggleWeekExpand(wNum) {
+    setExpandedWeeks(prev => ({ ...prev, [wNum]: !prev[wNum] }));
+  }
 
   function openNewPlan() {
     F({ name: '', distance: 'Marathon', goalTime: '4:30:00', raceDate: '', weeklyKm: '30', daysPerWeek: '4' });
@@ -493,7 +501,7 @@ function App() {
             <Empty title="No plan just yet" text="Set a race date and target time to build your first training schedule." action="Create a plan" click={openNewPlan}/>
           ) : (
             <>
-              <div className="plansummary" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div className="plansummary" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <div>
                   <small className="eyebrow">YOUR RACE</small>
                   <h2>{plan.name}</h2>
@@ -505,16 +513,112 @@ function App() {
                   <button className="btn secondary" onClick={() => deletePlan()} style={{ gap: '6px', color: '#ef4444' }}><Trash size={15}/> Delete</button>
                 </div>
               </div>
-              <div className="notice"><Sparkles size={17}/><p>This is a general, rule-based plan based on your goal and estimated weekly distance. Easy runs should feel conversational. Adjust sessions to your recovery and experience.</p></div>
-              <div className="sessions">
-                {plan.schedule.map(s => (
-                  <div className={'plansession ' + (s.race ? 'raceday ' : '') + (s.done ? 'isdone' : '')} key={s.id}>
-                    <div className="date"><small>{fmt(s.date, { weekday: 'short' })}</small><b>{fmt(s.date)}</b></div>
-                    <div className="sessiontext"><b>{s.type}</b><small>{s.race ? 'Your goal event' : `Week ${s.week} · ${s.type.includes('tempo') ? 'Controlled, comfortably hard effort' : 'Keep it relaxed and steady'}`}</small></div>
-                    <div className="dist"><b>{s.km} <em>km</em></b><small>{s.pace}/km target</small></div>
-                    <button className={'check ' + (s.done ? 'checked' : '')} onClick={() => toggle(s.id)}>{s.done ? <Check size={15}/> : ''}</button>
-                  </div>
-                ))}
+
+              {/* WEEKLY CARD CONTAINER OVERVIEW */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {Object.entries(weeksGrouped).map(([weekNum, sessions]) => {
+                  let isExpanded = expandedWeeks[weekNum] ?? (Number(weekNum) === 1);
+                  let weekDoneCount = sessions.filter(s => s.done).length;
+                  let isWeekComplete = weekDoneCount === sessions.length && sessions.length > 0;
+                  
+                  let targetWeekKm = sessions.reduce((sum, s) => sum + s.km, 0);
+                  let completedWeekKm = sessions.filter(s => s.done).reduce((sum, s) => sum + s.km, 0);
+
+                  return (
+                    <div 
+                      key={weekNum} 
+                      style={{ 
+                        background: '#121614', 
+                        border: isWeekComplete ? '2px solid #ccff00' : '1px solid rgba(255,255,255,0.1)', 
+                        borderRadius: '16px', 
+                        padding: '20px',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      {/* CARD HEADER */}
+                      <div 
+                        onClick={() => toggleWeekExpand(weekNum)}
+                        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+                      >
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <h3 style={{ fontSize: '1.35rem', fontWeight: 700, margin: 0, color: '#f4f4f5' }}>Week {weekNum}</h3>
+                            {isWeekComplete && (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#ccff00', color: '#090a09', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 700 }}>
+                                <CheckCircle2 size={13}/> COMPLETE
+                              </span>
+                            )}
+                          </div>
+
+                          {/* WORKOUTS & DISTANCE SUMMARY BARS */}
+                          <div style={{ display: 'flex', gap: '24px', marginTop: '10px', color: '#a1a1aa', fontSize: '0.85rem' }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <Footprints size={15} style={{ color: '#ccff00' }}/> 
+                              WORKOUTS: <strong style={{ color: '#f4f4f5' }}>{weekDoneCount}/{sessions.length}</strong>
+                            </span>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <Activity size={15} style={{ color: '#ccff00' }}/> 
+                              DISTANCE: <strong style={{ color: '#f4f4f5' }}>{completedWeekKm.toFixed(1)} / {targetWeekKm.toFixed(1)}KM</strong>
+                            </span>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <button className="btn secondary icononly" style={{ borderRadius: '50%', padding: '8px' }}>
+                            {isExpanded ? <ChevronUp size={18}/> : <ChevronDown size={18}/>}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* DAILY WORKOUT LIST (WHEN EXPANDED) */}
+                      {isExpanded && (
+                        <div style={{ marginTop: '20px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                          {sessions.map(s => (
+                            <div 
+                              key={s.id}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                background: s.done ? 'rgba(204,255,0,0.05)' : 'rgba(255,255,255,0.02)',
+                                padding: '12px 16px',
+                                borderRadius: '10px',
+                                border: s.done ? '1px solid rgba(204,255,0,0.2)' : '1px solid transparent'
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '16px', minWidth: '120px' }}>
+                                <span style={{ color: '#a1a1aa', fontWeight: 600, fontSize: '0.85rem', width: '36px' }}>
+                                  {fmt(s.date, { weekday: 'short' })}
+                                </span>
+                                <span style={{ fontWeight: 700, fontSize: '0.95rem', color: '#f4f4f5' }}>
+                                  {fmt(s.date, { day: 'numeric', month: 'short' })}
+                                </span>
+                              </div>
+
+                              <div style={{ flex: 1, padding: '0 16px' }}>
+                                <b style={{ fontSize: '0.95rem', color: s.race ? '#ccff00' : '#f4f4f5' }}>{s.type}</b>
+                                <small style={{ display: 'block', color: '#71717a', fontSize: '0.78rem' }}>
+                                  {s.race ? 'Race event day' : `Target Pace: ${s.pace}/km`}
+                                </small>
+                              </div>
+
+                              <div style={{ paddingRight: '20px', textAlign: 'right' }}>
+                                <b style={{ fontSize: '1rem', color: '#ccff00' }}>{s.km} km</b>
+                              </div>
+
+                              <button 
+                                className={'check ' + (s.done ? 'checked' : '')} 
+                                onClick={() => toggle(s.id)}
+                              >
+                                {s.done ? <Check size={15}/> : ''}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </>
           ))}
