@@ -190,15 +190,15 @@ function makePlan(p, userRuns = [], dateOverrides = {}) {
           if (!isLongRun) {
             if (i === 0) {
               d = 5.0;
-              type = 'Easy Run';
+              type = 'Easy run';
               sessionPace = pace(calibratedGP * 1.20);
             } else if (i === 1) {
               d = 6.5;
-              type = 'Easy / Tempo';
+              type = 'Steady / tempo';
               sessionPace = pace(calibratedGP * 1.05);
             } else {
               d = 4.8;
-              type = 'Recovery / Easy';
+              type = 'Recovery / easy';
               sessionPace = pace(calibratedGP * 1.25);
             }
           }
@@ -245,6 +245,7 @@ function App() {
         [editing, E] = useState(null),
         [notice, N] = useState(''),
         [busy, B] = useState(false),
+        [expandedWeeks, setExpandedWeeks] = useState({ 1: true }),
         
         [form, F] = useState({ 
           name: '', 
@@ -384,6 +385,10 @@ function App() {
       return acc;
     }, {});
   }, [plan]);
+
+  function toggleWeekExpand(wNum) {
+    setExpandedWeeks(prev => ({ ...prev, [wNum]: !prev[wNum] }));
+  }
 
   function exportPDF() {
     if (!plan) return;
@@ -815,31 +820,166 @@ function App() {
             <Empty title="No plan just yet" text="Set a race date and target time to build your first training schedule." action="Create a plan" click={openNewPlan}/>
           ) : (
             <>
-              <div className="plansummary">
+              {/* PLAN SUMMARY HEADER CARD */}
+              <div className="plansummary" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px', background: '#121614', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', padding: '24px' }}>
                 <div>
-                  <small className="eyebrow">YOUR RACE</small>
-                  <h2>{plan.name}</h2>
-                  <p>{plan.distance} · {fmt(plan.raceDate, { day: 'numeric', month: 'long', year: 'numeric' })} · Goal {plan.goalTime}</p>
+                  <small className="eyebrow" style={{ color: '#71717a', fontSize: '0.7rem', letterSpacing: '0.08em', fontWeight: 700 }}>YOUR RACE</small>
+                  <h2 style={{ fontSize: '1.6rem', fontWeight: 800, margin: '6px 0 4px 0', color: '#f4f4f5' }}>{plan.name}</h2>
+                  <p style={{ color: '#a1a1aa', fontSize: '0.88rem', margin: 0 }}>{plan.distance} · {fmt(plan.raceDate, { day: 'numeric', month: 'long', year: 'numeric' })} · Goal {plan.goalTime}</p>
                 </div>
-                <div>
-                  <small>Target pace</small>
-                  <b>{pace(plan.goalPace)} <em>/km</em></b>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
+                  <div style={{ paddingRight: '20px', borderRight: '1px solid rgba(255,255,255,0.08)' }}>
+                    <small style={{ color: '#71717a', fontSize: '0.75rem', display: 'block' }}>Target pace</small>
+                    <b style={{ font: '800 1.5rem Manrope, sans-serif', color: '#ccff00' }}>{pace(plan.goalPace)} <em style={{ fontSize: '0.8rem', color: '#a1a1aa' }}>/km</em></b>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <button className="btn secondary" onClick={openEditPlan} style={{ gap: '6px', fontSize: '0.85rem' }}>
+                      <Pencil size={15}/> Edit / Add Races
+                    </button>
+                    <button className="btn secondary" onClick={() => deletePlan()} style={{ gap: '6px', color: '#ef4444', fontSize: '0.85rem' }}>
+                      <Trash size={15}/> Delete
+                    </button>
+                  </div>
                 </div>
               </div>
-              <div className="notice"><Sparkles size={16}/><p>Schedule generated based on your goal race and weekly mileage. Check off runs as you complete them.</p></div>
-              
-              <div className="sessions">
-                {plan.schedule.map(s => (
-                  <div key={s.id} className={'plansession ' + (s.race ? 'raceday ' : '') + (s.done ? 'isdone' : '')}>
-                    <div className="date"><small>{fmt(s.date, { weekday: 'short' })}</small><b>{fmt(s.date)}</b></div>
-                    <div className="sessiontext">
-                      <b>{s.type}</b>
-                      <small>Week {s.week} · Target pace {s.pace}/km</small>
+
+              {/* COLLAPSIBLE WEEKLY CARDS CONTAINER */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '20px' }}>
+                {Object.entries(weeksGrouped).map(([weekNum, sessions]) => {
+                  let isExpanded = expandedWeeks[weekNum] ?? (Number(weekNum) === 1);
+                  let weekDoneCount = sessions.filter(s => s.done).length;
+                  let targetWeekKm = sessions.reduce((sum, s) => sum + s.km, 0);
+                  let completedWeekKm = sessions.filter(s => s.done).reduce((sum, s) => sum + s.km, 0);
+
+                  return (
+                    <div 
+                      key={weekNum} 
+                      style={{ 
+                        background: '#121614', 
+                        border: isExpanded ? '2px solid #ccff00' : '1px solid rgba(255,255,255,0.1)', 
+                        borderRadius: '16px', 
+                        padding: '24px',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      {/* WEEK CARD HEADER */}
+                      <div 
+                        onClick={() => toggleWeekExpand(weekNum)}
+                        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                          <h3 style={{ fontSize: '1.4rem', fontWeight: 800, margin: 0, color: '#f4f4f5' }}>Week {weekNum}</h3>
+                          <span style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', padding: '3px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.04em' }}>
+                            IN PROGRESS
+                          </span>
+                          <div style={{ display: 'flex', gap: '20px', color: '#a1a1aa', fontSize: '0.85rem' }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <Footprints size={15} style={{ color: '#38bdf8' }}/> 
+                              WORKOUTS: <strong style={{ color: '#f4f4f5' }}>{weekDoneCount}/{sessions.length}</strong>
+                            </span>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <Activity size={15} style={{ color: '#ccff00' }}/> 
+                              DISTANCE: <strong style={{ color: '#f4f4f5' }}>{completedWeekKm.toFixed(1)} / {targetWeekKm.toFixed(1)}KM</strong>
+                            </span>
+                          </div>
+                        </div>
+
+                        <button className="btn secondary icononly" style={{ borderRadius: '50%', padding: '8px' }}>
+                          {isExpanded ? <ChevronUp size={18}/> : <ChevronDown size={18}/>}
+                        </button>
+                      </div>
+
+                      {/* WEEKLY SESSIONS LIST */}
+                      {isExpanded && (
+                        <div style={{ marginTop: '20px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                          {sessions.map(s => {
+                            let isTuneUp = s.intermediate || String(s.type).includes('TUNE-UP');
+
+                            return (
+                              <div 
+                                key={s.id}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  background: 'rgba(255,255,255,0.03)',
+                                  padding: '14px 18px',
+                                  borderRadius: '10px',
+                                  border: isTuneUp ? '1px solid #ccff00' : '1px solid rgba(255,255,255,0.08)',
+                                  opacity: s.done ? 0.5 : 1,
+                                  transition: 'all 0.15s ease',
+                                  flexWrap: 'wrap',
+                                  gap: '12px'
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', minWidth: '140px' }}>
+                                  <span style={{ color: '#71717a', fontWeight: 600, fontSize: '0.85rem' }}>
+                                    {fmt(s.date, { weekday: 'short' })}
+                                  </span>
+                                  <strong style={{ color: '#f4f4f5', fontSize: '0.9rem' }}>
+                                    {fmt(s.date, { day: 'numeric', month: 'short' })}
+                                  </strong>
+                                </div>
+
+                                <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '12px', minWidth: '240px', flexWrap: 'wrap' }}>
+                                  {isTuneUp ? (
+                                    <span style={{
+                                      background: 'rgba(204, 255, 0, 0.15)',
+                                      border: '1px solid #ccff00',
+                                      color: '#ccff00',
+                                      padding: '4px 12px',
+                                      borderRadius: '8px',
+                                      fontWeight: 700,
+                                      fontSize: '0.82rem'
+                                    }}>
+                                      {s.type}
+                                    </span>
+                                  ) : (
+                                    <span style={{
+                                      background: 'rgba(56, 189, 248, 0.15)',
+                                      border: '1px solid #38bdf8',
+                                      color: '#38bdf8',
+                                      padding: '4px 12px',
+                                      borderRadius: '8px',
+                                      fontWeight: 700,
+                                      fontSize: '0.82rem'
+                                    }}>
+                                      {s.type}
+                                    </span>
+                                  )}
+                                  <small style={{ color: '#71717a', fontSize: '0.8rem' }}>
+                                    Target Pace: {s.pace}/km
+                                  </small>
+                                </div>
+
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                                  <b style={{ fontSize: '1.05rem', color: isTuneUp ? '#ccff00' : '#f4f4f5' }}>{s.km} km</b>
+                                  <button 
+                                    onClick={() => toggle(s.id)}
+                                    style={{
+                                      width: '28px',
+                                      height: '28px',
+                                      borderRadius: '6px',
+                                      border: s.done ? '2px solid #ccff00' : '2px solid rgba(255,255,255,0.2)',
+                                      background: s.done ? '#ccff00' : 'transparent',
+                                      color: s.done ? '#090a09' : 'transparent',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    {s.done ? <Check size={16} strokeWidth={3}/> : null}
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                    <div className="dist"><b>{s.km} km</b><small>{s.race ? 'Goal race' : 'Planned'}</small></div>
-                    <button className={'check ' + (s.done ? 'checked' : '')} onClick={() => toggle(s.id)}>{s.done ? <Check size={14}/> : ''}</button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </>
           ))}
