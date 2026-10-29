@@ -407,7 +407,6 @@ function App() {
       upcoming = plan?.schedule?.filter(s => !s.done && s.date >= today()).slice(0, 4) || [],
       predictions = useMemo(() => predictRaceTimes(state.runs), [state.runs]);
 
-  // PLAN HASH FOR VERSION CHECK / UPDATE PROMPT
   const currentPlanHash = useMemo(() => {
     if (!plan) return '';
     return JSON.stringify({ name: plan.name, raceDate: plan.raceDate, goalTime: plan.goalTime, schedLen: plan.schedule.length, overrides: state.sessionDateOverrides });
@@ -444,14 +443,12 @@ function App() {
     N('Workout rescheduled.');
   }
 
-  // EXPORT PLAN AS PDF
   function exportPDF() {
     if (!plan) return;
     window.print();
     N('PDF print dialog opened.');
   }
 
-  // EXPORT / SYNC PLAN TO CALENDAR (.ICS FILE)
   function syncCalendar() {
     if (!plan || !plan.schedule) return;
     let icsLines = [
@@ -485,7 +482,6 @@ function App() {
     a.click();
     URL.revokeObjectURL(url);
 
-    // Update synced hash
     S(s => ({ ...s, lastSyncedPlanHash: currentPlanHash }));
     N('Calendar schedule exported! Import the .ics file into Google Calendar.');
   }
@@ -717,7 +713,8 @@ function App() {
 
   return (
     <div className="shell">
-      <aside className="sidebar">
+      {/* SIDEBAR FOR DESKTOP */}
+      <aside className="sidebar desktop-sidebar">
         <div className="brand"><b><Activity size={22}/></b>stride<span>.</span></div>
         <small className="side-label">WORKSPACE</small>
         {nav.map(([n, I]) => (
@@ -730,7 +727,26 @@ function App() {
           <small>● Saved on this device</small>
         </div>
       </aside>
-      <main>
+
+      {/* MOBILE BOTTOM NAVIGATION BAR */}
+      <nav className="mobile-bottom-nav">
+        {nav.map(([n, I]) => {
+          let tabKey = n === 'Training plan' ? 'Plan' : n;
+          let isActive = tab === tabKey;
+          return (
+            <button 
+              key={n} 
+              className={'mobile-nav-item ' + (isActive ? 'active' : '')} 
+              onClick={() => T(tabKey)}
+            >
+              <I size={20}/>
+              <span>{n.replace('Training plan', 'Plan').replace('Data & settings', 'Settings')}</span>
+            </button>
+          );
+        })}
+      </nav>
+
+      <main className="main-content-area">
         <header className="top">
           <div className="mobilebrand"><b><Activity size={18}/></b>stride<span>.</span></div>
           <div className="crumb">Workspace <i>/</i> <strong>{tab}</strong></div>
@@ -755,11 +771,11 @@ function App() {
             <button className="avatar" onClick={() => T('Data & settings')}>S</button>
           </div>
         </header>
-        <div className="page">
+        <div className="page" style={{ paddingBottom: '90px' }}>
           
           {/* PLAN UPDATE PROMPT BANNER */}
           {isPlanOutdated && (
-            <div style={{ background: 'rgba(204, 255, 0, 0.15)', border: '1px solid #ccff00', borderRadius: '12px', padding: '14px 20px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ background: 'rgba(204, 255, 0, 0.15)', border: '1px solid #ccff00', borderRadius: '12px', padding: '14px 20px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <Sparkles size={20} style={{ color: '#ccff00' }}/>
                 <div>
@@ -833,7 +849,7 @@ function App() {
                   </small>
                 </div>
                 {predictions ? (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginTop: '12px' }}>
+                  <div className="predictor-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '16px', marginTop: '12px' }}>
                     {Object.entries(predictions.results).map(([dist, data]) => (
                       <div key={dist} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '16px' }}>
                         <small style={{ color: '#a1a1aa', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{dist}</small>
@@ -883,16 +899,16 @@ function App() {
             <Empty title="No plan just yet" text="Set a race date and target time to build your first training schedule." action="Create a plan" click={openNewPlan}/>
           ) : (
             <>
-              <div className="plansummary" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div className="plansummary" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
                 <div>
                   <small className="eyebrow">YOUR RACE</small>
                   <h2>{plan.name}</h2>
                   <p>{plan.distance} · {fmt(plan.raceDate, { day: 'numeric', month: 'long', year: 'numeric' })} · Goal {plan.goalTime}</p>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                   <div><small>Target pace</small><b>{pace(plan.goalPace)} <em>/km</em></b></div>
-                  <button className="btn secondary" onClick={exportPDF} style={{ gap: '6px' }}><FileText size={15}/> Export PDF</button>
-                  <button className="btn secondary" onClick={syncCalendar} style={{ gap: '6px', borderColor: isPlanOutdated ? '#ccff00' : undefined }}><Calendar size={15}/> {state.lastSyncedPlanHash ? 'Sync Calendar' : 'Sync to Calendar'}</button>
+                  <button className="btn secondary" onClick={exportPDF} style={{ gap: '6px' }}><FileText size={15}/> PDF</button>
+                  <button className="btn secondary" onClick={syncCalendar} style={{ gap: '6px', borderColor: isPlanOutdated ? '#ccff00' : undefined }}><Calendar size={15}/> {state.lastSyncedPlanHash ? 'Sync' : 'Sync Cal'}</button>
                   <button className="btn secondary" onClick={openEditPlan} style={{ gap: '6px' }}><Pencil size={15}/> Edit</button>
                   <button className="btn secondary" onClick={() => deletePlan()} style={{ gap: '6px', color: '#ef4444' }}><Trash size={15}/> Delete</button>
                 </div>
@@ -939,7 +955,7 @@ function App() {
                             )}
                           </div>
 
-                          <div style={{ display: 'flex', gap: '24px', marginTop: '10px', color: '#a1a1aa', fontSize: '0.85rem' }}>
+                          <div style={{ display: 'flex', gap: '24px', marginTop: '10px', color: '#a1a1aa', fontSize: '0.85rem', flexWrap: 'wrap' }}>
                             <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                               <Footprints size={15} style={{ color: '#38bdf8' }}/> 
                               WORKOUTS: <strong style={{ color: '#f4f4f5' }}>{weekDoneCount}/{sessions.length}</strong>
@@ -968,17 +984,20 @@ function App() {
                             return (
                               <div 
                                 key={s.id}
+                                className="workout-row"
                                 style={{
                                   display: 'flex',
                                   alignItems: 'center',
-                                  justify: 'space-between',
+                                  justifyContent: 'space-between',
                                   background: s.done ? 'rgba(255,255,255,0.01)' : 'rgba(255,255,255,0.03)',
                                   padding: '14px 16px',
                                   borderRadius: '10px',
                                   border: s.done ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(255,255,255,0.1)',
                                   opacity: s.done ? 0.45 : 1,
                                   filter: s.done ? 'grayscale(0.3)' : 'none',
-                                  transition: 'all 0.2s ease'
+                                  transition: 'all 0.2s ease',
+                                  flexWrap: 'wrap',
+                                  gap: '10px'
                                 }}
                               >
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: '150px' }}>
@@ -1003,8 +1022,8 @@ function App() {
                                   />
                                 </div>
 
-                                <div style={{ flex: 1, padding: '0 16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <div style={{ flex: 1, padding: '0 16px', display: 'flex', flexDirection: 'column', gap: '6px', minWidth: '220px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                                     <span style={{
                                       background: badgeStyle.bg,
                                       border: `1px solid ${badgeStyle.border}`,
@@ -1042,7 +1061,7 @@ function App() {
                                     color: s.done ? '#090a09' : 'transparent',
                                     display: 'flex',
                                     alignItems: 'center',
-                                    justify: 'center',
+                                    justifyContent: 'center',
                                     cursor: 'pointer',
                                     transition: 'all 0.15s ease'
                                   }}
@@ -1063,7 +1082,7 @@ function App() {
 
           {tab === 'Run log' && (
             <>
-              <div className="runstats" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+              <div className="runstats" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))' }}>
                 <div><small>Total runs</small><b>{state.runs.length}</b></div>
                 <div><small>Lifetime distance</small><b>{total.toFixed(1)} <em>km</em></b></div>
                 <div><small>Monthly distance</small><b>{month.toFixed(1)} <em>km</em></b></div>
@@ -1104,7 +1123,7 @@ function App() {
 
           {tab === 'Progress' && (
             <>
-              <div className="stats" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
+              <div className="stats" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
                 <Stat I={Footprints} label="Lifetime distance" value={total.toFixed(1) + ' km'} note={state.runs.length + ' runs logged'}/>
                 <Stat I={CalendarDays} label="Monthly distance" value={month.toFixed(1) + ' km'} note="Current month"/>
                 <Stat I={Activity} label="Weekly distance" value={week.toFixed(1) + ' km'} note="Current week"/>
