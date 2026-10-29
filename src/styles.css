@@ -947,3 +947,28 @@ footer b {
     display: none !important;
   }
 }
+
+.runstats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 13px;
+  margin-bottom: 17px;
+}
+
+.runstats > div {
+  background: var(--panel);
+  border: 1px solid #29322b;
+  border-radius: 12px;
+  padding: 16px 20px;
+  display: grid;
+  gap: 8px;
+}
+
+.runstats small {
+  font-size: 11px;
+  color: #909b90;
+}
+
+.runstats b {
+  font: 800 25px Manrope, sans-serif;
+}
