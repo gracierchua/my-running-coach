@@ -19,7 +19,6 @@ const KEY = 'stride-running-coach-v1',
         { label: 'Sat', val: 5 },
         { label: 'Sun', val: 6 }
       ],
-      // Long run mileage progression from blueprint (Converted Miles to KM)
       LONG_RUN_PROGRESSION_KM = [6.4, 9.7, 12.9, 16.1, 20.9, 25.7, 32.2],
 
       today = () => new Date().toISOString().slice(0, 10),
@@ -92,7 +91,7 @@ const KEY = 'stride-running-coach-v1',
         return '3-5 miles comfortable pace • Conversational effort throughout';
       },
       
-      fresh = () => ({ plans: [], runs: [], activePlanId: null });
+      fresh = () => ({ plans: [], runs: [], activePlanId: null, sessionDateOverrides: {} });
 
 function load() {
   try {
@@ -132,8 +131,7 @@ function predictRaceTimes(runs) {
   return { results, baseline: bestRun };
 }
 
-// AI PLAN GENERATOR USING PROGRESSION BLUEPRINT
-function makePlan(p, userRuns = []) {
+function makePlan(p, userRuns = [], dateOverrides = {}) {
   let km = KM[p.distance] || 42.195,
       race = new Date(p.raceDate + 'T12:00:00'),
       now = new Date(today() + 'T12:00:00'),
@@ -164,7 +162,6 @@ function makePlan(p, userRuns = []) {
     let left = weeks - w;
     let deload = (w + 1) % 4 === 0;
 
-    // Progression Plan mapping based on blueprint
     let progIndex = Math.min(w, LONG_RUN_PROGRESSION_KM.length - 1);
     let long = LONG_RUN_PROGRESSION_KM[progIndex];
 
@@ -173,9 +170,9 @@ function makePlan(p, userRuns = []) {
     }
 
     if (left === 1) {
-      long = km >= 40 ? 8.0 : 5.0; // Taper final week
+      long = km >= 40 ? 8.0 : 5.0;
     } else if (left === 2) {
-      long = km >= 40 ? 16.1 : 10.0; // Taper week 2
+      long = km >= 40 ? 16.1 : 10.0;
     } else if (deload && left > 3) {
       long = Math.round(long * 0.75 * 10) / 10;
     }
@@ -183,9 +180,15 @@ function makePlan(p, userRuns = []) {
     long = Math.round(long * 10) / 10;
 
     selectedSlots.forEach((dayOffset, i) => {
-      let date = new Date(monday);
-      date.setDate(monday.getDate() + w * 7 + dayOffset);
-      let ds = date.toISOString().slice(0, 10);
+      let baseDate = new Date(monday);
+      baseDate.setDate(monday.getDate() + w * 7 + dayOffset);
+      let ds = baseDate.toISOString().slice(0, 10);
+      let sessionId = `w${w+1}-d${dayOffset}-${i}`;
+
+      // Check if user rescheduled this specific session
+      if (dateOverrides[sessionId]) {
+        ds = dateOverrides[sessionId];
+      }
       
       if (ds < p.raceDate) {
         let matchInterRace = interRaces.find(r => r.date === ds);
@@ -193,7 +196,7 @@ function makePlan(p, userRuns = []) {
         if (matchInterRace) {
           let raceKm = KM[matchInterRace.distance] || Number(matchInterRace.distance) || 10;
           schedule.push({
-            id: uid(),
+            id: sessionId,
             date: ds,
             week: w + 1,
             km: raceKm,
@@ -210,15 +213,15 @@ function makePlan(p, userRuns = []) {
 
           if (!isLongRun) {
             if (i === 0) {
-              d = 5.0; // Tue Easy Run: 3-5 miles (~5-8km)
+              d = 5.0;
               type = 'Easy Run';
               sessionPace = pace(calibratedGP * 1.20);
             } else if (i === 1) {
-              d = 6.5; // Thu Easy/Tempo Run: 3-6 miles (~5-9.6km)
+              d = 6.5;
               type = 'Easy / Tempo';
               sessionPace = pace(calibratedGP * 1.05);
             } else {
-              d = 4.8; // Sun Recovery/Easy: 2-4 miles (~3.2-6.4km)
+              d = 4.8;
               type = 'Recovery / Easy';
               sessionPace = pace(calibratedGP * 1.25);
             }
@@ -230,7 +233,7 @@ function makePlan(p, userRuns = []) {
           }
 
           schedule.push({
-            id: uid(),
+            id: sessionId,
             date: ds,
             week: w + 1,
             km: d,
@@ -306,7 +309,7 @@ function App() {
 
   const plan = useMemo(() => {
     if (!rawPlan) return null;
-    let basePlan = makePlan(rawPlan, state.runs);
+    let basePlan = makePlan(rawPlan, state.runs, state.sessionDateOverrides || {});
     let planStartMonday = basePlan.mondayDate;
 
     let planRuns = state.runs.filter(r => r.date >= planStartMonday);
@@ -381,7 +384,7 @@ function App() {
     });
 
     return { ...basePlan, schedule: finalSchedule };
-  }, [rawPlan, state.runs]);
+  }, [rawPlan, state.runs, state.sessionDateOverrides]);
 
   let done = plan?.schedule?.filter(s => s.done).length || 0,
       upcoming = plan?.schedule?.filter(s => !s.done && s.date >= today()).slice(0, 4) || [],
@@ -399,6 +402,18 @@ function App() {
 
   function toggleWeekExpand(wNum) {
     setExpandedWeeks(prev => ({ ...prev, [wNum]: !prev[wNum] }));
+  }
+
+  function handleDateChange(sessionId, newDate) {
+    if (!newDate) return;
+    S(s => ({
+      ...s,
+      sessionDateOverrides: {
+        ...(s.sessionDateOverrides || {}),
+        [sessionId]: newDate
+      }
+    }));
+    N('Workout rescheduled.');
   }
 
   function openNewPlan() {
@@ -469,14 +484,14 @@ function App() {
     }
 
     if (modal === 'editPlan' && rawPlan) {
-      let updated = makePlan({ ...rawPlan, ...form }, state.runs);
+      let updated = makePlan({ ...rawPlan, ...form }, state.runs, state.sessionDateOverrides || {});
       S(s => ({
         ...s,
         plans: s.plans.map(p => p.id === rawPlan.id ? updated : p)
       }));
       N('Plan updated successfully.');
     } else {
-      let p = makePlan({ ...form, id: uid() }, state.runs);
+      let p = makePlan({ ...form, id: uid() }, state.runs, state.sessionDateOverrides || {});
       S(s => ({ ...s, plans: [p, ...s.plans], activePlanId: p.id }));
       T('Plan');
       N('Your suggested plan is ready.');
@@ -843,7 +858,7 @@ function App() {
                         </div>
                       </div>
 
-                      {/* DAILY WORKOUT LIST WITH SHORT DESCRIPTIONS */}
+                      {/* DAILY WORKOUT LIST WITH INLINE DATE RESCHEDULING */}
                       {isExpanded && (
                         <div style={{ marginTop: '20px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                           {sessions.map(s => {
@@ -866,13 +881,29 @@ function App() {
                                   transition: 'all 0.2s ease'
                                 }}
                               >
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', minWidth: '110px' }}>
-                                  <span style={{ color: s.done ? '#71717a' : '#a1a1aa', fontWeight: 600, fontSize: '0.85rem', width: '36px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: '150px' }}>
+                                  <span style={{ color: s.done ? '#71717a' : '#a1a1aa', fontWeight: 600, fontSize: '0.85rem' }}>
                                     {fmt(s.date, { weekday: 'short' })}
                                   </span>
-                                  <span style={{ fontWeight: 700, fontSize: '0.95rem', color: s.done ? '#a1a1aa' : '#f4f4f5', textDecoration: s.done ? 'line-through' : 'none' }}>
-                                    {fmt(s.date, { day: 'numeric', month: 'short' })}
-                                  </span>
+                                  {/* INLINE DATE PICKER TO EASILY SWAP/EDIT RUN DAY */}
+                                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                                    <input 
+                                      type="date"
+                                      value={s.date}
+                                      onChange={e => handleDateChange(s.id, e.target.value)}
+                                      style={{
+                                        background: 'rgba(255,255,255,0.06)',
+                                        border: '1px solid rgba(255,255,255,0.15)',
+                                        borderRadius: '6px',
+                                        color: '#f4f4f5',
+                                        padding: '4px 8px',
+                                        fontSize: '0.82rem',
+                                        fontWeight: 600,
+                                        cursor: 'pointer'
+                                      }}
+                                      title="Click to reschedule run date"
+                                    />
+                                  </div>
                                 </div>
 
                                 {/* WORKOUT TYPE & SHORT DESCRIPTION */}
