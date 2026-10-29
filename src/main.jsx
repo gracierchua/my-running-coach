@@ -101,34 +101,56 @@ function load() {
   }
 }
 
+// MULTI-RUN AGGREGATED AI RACE PREDICTOR WITH HEART RATE EFFICIENCY
 function predictRaceTimes(runs) {
   if (!runs || runs.length === 0) return null;
   let validRuns = runs.filter(r => Number(r.distance) >= 3 && parseTime(r.duration) > 0);
   if (validRuns.length === 0) return null;
 
-  let bestRun = validRuns.reduce((best, cur) => {
-    let curSecs = parseTime(cur.duration);
-    let curPaceSec = curSecs / Number(cur.distance);
-    let bestSecs = parseTime(best.duration);
-    let bestPaceSec = bestSecs / Number(best.distance);
-    return curPaceSec < bestPaceSec ? cur : best;
-  }, validRuns[0]);
+  // Aggregate performance across ALL valid logged runs
+  let totalDist = 0;
+  let weightedPaceSecSum = 0;
+  let hrSum = 0;
+  let hrCount = 0;
 
-  let d1 = Number(bestRun.distance);
-  let t1 = parseTime(bestRun.duration);
+  validRuns.forEach(r => {
+    let d = Number(r.distance);
+    let t = parseTime(r.duration);
+    let pSec = t / d;
+    totalDist += d;
+    weightedPaceSecSum += pSec * d;
 
+    let hr = parseInt(r.hr || r.heartRate);
+    if (!Number.isNaN(hr) && hr > 0) {
+      hrSum += hr * d; // weighted by distance
+      hrCount += d;
+    }
+  });
+
+  let baselinePaceSec = weightedPaceSecSum / totalDist;
+  let avgHr = hrCount > 0 ? Math.round(hrSum / hrCount) : null;
+
+  // HR Efficiency Factor adjustment (lower HR at same pace indicates better fitness)
+  let hrMultiplier = 1.0;
+  if (avgHr) {
+    if (avgHr < 140) hrMultiplier = 0.97; // High efficiency
+    else if (avgHr > 165) hrMultiplier = 1.04; // High cardiac strain
+  }
+
+  let adjustedPaceSec = baselinePaceSec * hrMultiplier;
   const targets = { '5K': 5.0, '10K': 10.0, '21.1K': 21.0975, '42.2K': 42.195 };
   let results = {};
 
   for (let [label, d2] of Object.entries(targets)) {
-    let predictedSecs = t1 * Math.pow(d2 / d1, 1.06);
+    // Riegel formula with multi-run baseline & HR calibration
+    let predictedSecs = (adjustedPaceSec * d2) * Math.pow(d2 / Math.max(5, totalDist / validRuns.length), 0.05);
     results[label] = {
       time: formatDuration(predictedSecs),
       pace: pace(predictedSecs / d2)
     };
   }
 
-  return { results, baseline: bestRun };
+  return { results, totalRunsAnalyzed: validRuns.length, avgHr };
 }
 
 function makePlan(p, userRuns = [], dateOverrides = {}) {
@@ -185,7 +207,6 @@ function makePlan(p, userRuns = [], dateOverrides = {}) {
       let ds = baseDate.toISOString().slice(0, 10);
       let sessionId = `w${w+1}-d${dayOffset}-${i}`;
 
-      // Check if user rescheduled this specific session
       if (dateOverrides[sessionId]) {
         ds = dateOverrides[sessionId];
       }
@@ -281,7 +302,7 @@ function App() {
           intermediateRaces: []
         }),
         [newInterRace, setNewInterRace] = useState({ name: '', distance: '10K', date: '' }),
-        [run, R] = useState({ date: today(), distance: '', duration: '', pace: '', notes: '' });
+        [run, R] = useState({ date: today(), distance: '', duration: '', pace: '', hr: '', notes: '' });
 
   useEffect(() => { localStorage.setItem(KEY, JSON.stringify(state)); }, [state]);
   useEffect(() => {
@@ -534,6 +555,7 @@ function App() {
             distance: session.km,
             duration: '',
             pace: session.pace,
+            hr: '',
             notes: session.type
           });
         }
@@ -550,7 +572,7 @@ function App() {
 
   function openRun(r) {
     E(r?.id || null);
-    R(r ? { date: r.date, distance: String(r.distance), duration: r.duration || '', pace: r.pace || '', notes: r.notes || '' } : { date: today(), distance: '', duration: '', pace: '', notes: '' });
+    R(r ? { date: r.date, distance: String(r.distance), duration: r.duration || '', pace: r.pace || '', hr: r.hr || '', notes: r.notes || '' } : { date: today(), distance: '', duration: '', pace: '', hr: '', notes: '' });
     M('run');
   }
 
@@ -568,6 +590,7 @@ function App() {
       distance: d,
       duration: run.duration,
       pace: run.pace || (Number.isFinite(secs) ? pace(secs / d) : ''),
+      hr: run.hr ? Number(run.hr) : '',
       notes: run.notes
     };
 
@@ -591,12 +614,14 @@ function App() {
       let text = res.data.text || '',
           dm = text.match(/(\d{1,2}(?:\.\d{1,2})?)\s*(?:km|kilometers?|kilometres?)\b/i),
           tm = text.match(/\b(\d{1,2}:\d{2}:\d{2}|\d{1,3}:\d{2})\b/),
-          pm = text.match(/(\d{1,2}:\d{2})\s*(?:\/\s*km|per\s*km)/i);
+          pm = text.match(/(\d{1,2}:\d{2})\s*(?:\/\s*km|per\s*km)/i),
+          hm = text.match(/(\d{2,3})\s*(?:bpm|hr)/i);
       R(v => ({
         ...v,
         distance: v.distance || (dm ? dm[1] : ''),
         duration: v.duration || (tm ? tm[1] : ''),
-        pace: v.pace || (pm ? pm[1] : '')
+        pace: v.pace || (pm ? pm[1] : ''),
+        hr: v.hr || (hm ? hm[1] : '')
       }));
       N('Screenshot scanned. Check the fields before saving.');
     } catch {
@@ -725,14 +750,16 @@ function App() {
                 </div>
               </div>
 
-              {/* AI RACE PREDICTOR CARD */}
+              {/* AI RACE PREDICTOR CARD (AGREGATED ACROSS ALL LOGGED RUNS & HR) */}
               <section className="panel" style={{ marginBottom: '24px' }}>
                 <div className="panelhead">
                   <div>
                     <small className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><Zap size={14}/> AI RACE PREDICTOR</small>
                     <h3>Estimated Race Finishing Times</h3>
                   </div>
-                  {predictions?.baseline && <small className="pill">Based on {predictions.baseline.distance}km run ({fmt(predictions.baseline.date)})</small>}
+                  <small className="pill">
+                    {predictions ? `Based on ${predictions.totalRunsAnalyzed} logged runs${predictions.avgHr ? ' (Avg HR: ' + predictions.avgHr + ' bpm)' : ''}` : 'Log runs to calibrate'}
+                  </small>
                 </div>
                 {predictions ? (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginTop: '12px' }}>
@@ -771,7 +798,7 @@ function App() {
                   {runs.slice(0, 3).length ? runs.slice(0, 3).map(r => (
                     <div className="recent" key={r.id}>
                       <div className="roundicon"><Footprints size={17}/></div>
-                      <div><b>{r.distance} km run</b><small>{fmt(r.date)}{r.pace ? ' · ' + r.pace + '/km' : ''}</small></div>
+                      <div><b>{r.distance} km run</b><small>{fmt(r.date)}{r.pace ? ' · ' + r.pace + '/km' : ''}{r.hr ? ' · ' + r.hr + ' bpm' : ''}</small></div>
                       <strong>{r.duration || 'Logged'}</strong>
                     </div>
                   )) : <p className="muted">Your first run is waiting to be logged.</p>}
@@ -885,28 +912,24 @@ function App() {
                                   <span style={{ color: s.done ? '#71717a' : '#a1a1aa', fontWeight: 600, fontSize: '0.85rem' }}>
                                     {fmt(s.date, { weekday: 'short' })}
                                   </span>
-                                  {/* INLINE DATE PICKER TO EASILY SWAP/EDIT RUN DAY */}
-                                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                                    <input 
-                                      type="date"
-                                      value={s.date}
-                                      onChange={e => handleDateChange(s.id, e.target.value)}
-                                      style={{
-                                        background: 'rgba(255,255,255,0.06)',
-                                        border: '1px solid rgba(255,255,255,0.15)',
-                                        borderRadius: '6px',
-                                        color: '#f4f4f5',
-                                        padding: '4px 8px',
-                                        fontSize: '0.82rem',
-                                        fontWeight: 600,
-                                        cursor: 'pointer'
-                                      }}
-                                      title="Click to reschedule run date"
-                                    />
-                                  </div>
+                                  <input 
+                                    type="date"
+                                    value={s.date}
+                                    onChange={e => handleDateChange(s.id, e.target.value)}
+                                    style={{
+                                      background: 'rgba(255,255,255,0.06)',
+                                      border: '1px solid rgba(255,255,255,0.15)',
+                                      borderRadius: '6px',
+                                      color: '#f4f4f5',
+                                      padding: '4px 8px',
+                                      fontSize: '0.82rem',
+                                      fontWeight: 600,
+                                      cursor: 'pointer'
+                                    }}
+                                    title="Click to reschedule run date"
+                                  />
                                 </div>
 
-                                {/* WORKOUT TYPE & SHORT DESCRIPTION */}
                                 <div style={{ flex: 1, padding: '0 16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                                     <span style={{
@@ -926,7 +949,6 @@ function App() {
                                     </small>
                                   </div>
 
-                                  {/* WORKOUT BREAKDOWN DESCRIPTION */}
                                   <div style={{ color: '#a1a1aa', fontSize: '0.8rem', lineHeight: '1.3' }}>
                                     {description}
                                   </div>
@@ -936,7 +958,6 @@ function App() {
                                   <b style={{ fontSize: '1rem', color: badgeStyle.color }}>{s.km} km</b>
                                 </div>
 
-                                {/* CHECKBOX WITH CHECK TICK */}
                                 <button 
                                   onClick={() => toggle(s.id)}
                                   style={{
@@ -980,7 +1001,7 @@ function App() {
                 {runs.length ? (
                   <div className="tablewrap">
                     <table>
-                      <thead><tr><th>DATE</th><th>ACTIVITY</th><th>DISTANCE</th><th>TIME</th><th>AVG. PACE</th><th></th></tr></thead>
+                      <thead><tr><th>DATE</th><th>ACTIVITY</th><th>DISTANCE</th><th>TIME</th><th>AVG. PACE</th><th>AVG. HR</th><th></th></tr></thead>
                       <tbody>
                         {runs.map(r => (
                           <tr key={r.id}>
@@ -989,6 +1010,7 @@ function App() {
                             <td>{Number(r.distance).toFixed(2)} km</td>
                             <td>{r.duration || '—'}</td>
                             <td>{r.pace ? r.pace + '/km' : '—'}</td>
+                            <td>{r.hr ? r.hr + ' bpm' : '—'}</td>
                             <td>
                               <div className="actions">
                                 <button onClick={() => openRun(r)}>Edit</button>
@@ -1173,6 +1195,9 @@ function App() {
                 <div className="formrow">
                   <label>Duration <small>H:MM:SS or MM:SS</small><input placeholder="55:30" value={run.duration} onChange={e => R({ ...run, duration: e.target.value })}/></label>
                   <label>Average pace <small>Optional, e.g. 5:33</small><input placeholder="min/km" value={run.pace} onChange={e => R({ ...run, pace: e.target.value })}/></label>
+                </div>
+                <div className="formrow">
+                  <label>Avg. Heart Rate <small>Optional, e.g. 152</small><input type="number" placeholder="bpm" value={run.hr} onChange={e => R({ ...run, hr: e.target.value })}/></label>
                 </div>
                 <label>Notes<textarea rows="3" placeholder="Easy effort, humid weather…" value={run.notes} onChange={e => R({ ...run, notes: e.target.value })}/></label>
                 <div className="modalactions"><button type="button" className="btn secondary" onClick={() => M('')}>Cancel</button><button className="btn primary"><Check size={16}/>{editing ? 'Save changes' : 'Save run'}</button></div>
