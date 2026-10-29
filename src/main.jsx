@@ -4,7 +4,7 @@ import {
   Activity, CalendarDays, Check, ChevronDown, Footprints, 
   LayoutDashboard, Plus, Target, Timer, Trophy, TrendingUp, 
   Settings2, ArrowDownToLine, ArrowUpFromLine, ImagePlus, 
-  Trash2, X, Sparkles, ListChecks, HeartPulse, Pencil, Trash
+  Trash2, X, Sparkles, ListChecks, HeartPulse, Pencil, Trash, Zap
 } from 'lucide-react';
 import './styles.css';
 
@@ -27,6 +27,17 @@ const KEY = 'stride-running-coach-v1',
         if (p.length === 2) return p[0] * 60 + p[1];
         return NaN;
       },
+
+      formatDuration = secs => {
+        if (!Number.isFinite(secs) || secs <= 0) return '—';
+        let h = Math.floor(secs / 3600),
+            m = Math.floor((secs % 3600) / 60),
+            s = Math.round(secs % 60);
+        if (h > 0) {
+          return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        }
+        return `${m}:${String(s).padStart(2, '0')}`;
+      },
       
       fresh = () => ({ plans: [], runs: [], activePlanId: null });
 
@@ -36,6 +47,44 @@ function load() {
   } catch {
     return fresh();
   }
+}
+
+// Riegel Race Predictor Formula: T2 = T1 * (D2 / D1)^1.06
+function predictRaceTimes(runs) {
+  if (!runs || runs.length === 0) return null;
+
+  // Find best recent performance (best pace with min distance of 3km)
+  let validRuns = runs.filter(r => Number(r.distance) >= 3 && parseTime(r.duration) > 0);
+  if (validRuns.length === 0) return null;
+
+  let bestRun = validRuns.reduce((best, cur) => {
+    let curSecs = parseTime(cur.duration);
+    let curPaceSec = curSecs / Number(cur.distance);
+    let bestSecs = parseTime(best.duration);
+    let bestPaceSec = bestSecs / Number(best.distance);
+    return curPaceSec < bestPaceSec ? cur : best;
+  }, validRuns[0]);
+
+  let d1 = Number(bestRun.distance);
+  let t1 = parseTime(bestRun.duration);
+
+  const targets = {
+    '5K': 5.0,
+    '10K': 10.0,
+    '21.1K': 21.0975,
+    '42.2K': 42.195
+  };
+
+  let results = {};
+  for (let [label, d2] of Object.entries(targets)) {
+    let predictedSecs = t1 * Math.pow(d2 / d1, 1.06);
+    results[label] = {
+      time: formatDuration(predictedSecs),
+      pace: pace(predictedSecs / d2)
+    };
+  }
+
+  return { results, baseline: bestRun };
 }
 
 function makePlan(p) {
@@ -103,11 +152,9 @@ function App() {
       runs = [...state.runs].sort((a, b) => b.date.localeCompare(a.date)),
       total = state.runs.reduce((s, r) => s + Number(r.distance), 0),
       
-      // Calculate current month's mileage
       currentMonthStr = today().slice(0, 7),
       month = state.runs.filter(r => r.date.startsWith(currentMonthStr)).reduce((s, r) => s + Number(r.distance), 0),
       
-      // Calculate current week's mileage
       week = state.runs.filter(r => {
         let d = new Date(r.date + 'T12:00:00'),
             n = new Date(),
@@ -118,7 +165,10 @@ function App() {
       }).reduce((s, r) => s + Number(r.distance), 0),
       
       done = plan?.schedule?.filter(s => s.done).length || 0,
-      upcoming = plan?.schedule?.filter(s => !s.done && s.date >= today()).slice(0, 4) || [];
+      upcoming = plan?.schedule?.filter(s => !s.done && s.date >= today()).slice(0, 4) || [],
+      
+      // Compute AI race predictions
+      predictions = useMemo(() => predictRaceTimes(state.runs), [state.runs]);
 
   function openNewPlan() {
     F({ name: '', distance: 'Marathon', goalTime: '4:30:00', raceDate: '', weeklyKm: '20', daysPerWeek: '4' });
@@ -360,6 +410,31 @@ function App() {
                   <i>✳</i>
                 </div>
               </div>
+
+              {/* AI RACE PREDICTOR CARD */}
+              <section className="panel" style={{ marginBottom: '24px' }}>
+                <div className="panelhead">
+                  <div>
+                    <small className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><Zap size={14}/> AI RACE PREDICTOR</small>
+                    <h3>Estimated Race Finishing Times</h3>
+                  </div>
+                  {predictions?.baseline && <small className="pill">Based on {predictions.baseline.distance}km run ({fmt(predictions.baseline.date)})</small>}
+                </div>
+                {predictions ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginTop: '12px' }}>
+                    {Object.entries(predictions.results).map(([dist, data]) => (
+                      <div key={dist} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '16px' }}>
+                        <small style={{ color: '#a1a1aa', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{dist}</small>
+                        <div style={{ fontSize: '1.5rem', fontWeight: 700, margin: '6px 0', color: '#ccff00' }}>{data.time}</div>
+                        <small style={{ color: '#71717a' }}>Avg pace: {data.pace}/km</small>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="muted" style={{ padding: '12px 0' }}>Log at least one run of 3km+ with duration to generate your predicted times.</p>
+                )}
+              </section>
+
               <div className="stats">
                 <Stat I={Footprints} label="Total distance" value={total.toFixed(1) + ' km'} note="All logged runs"/>
                 <Stat I={CalendarDays} label="This month" value={month.toFixed(1) + ' km'} note="Current month"/>
