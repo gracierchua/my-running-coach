@@ -49,47 +49,6 @@ const KEY = 'stride-running-coach-v1',
         }
         return `${m}:${String(s).padStart(2, '0')}`;
       },
-
-      getWorkoutBadgeStyle = type => {
-        let lower = String(type || '').toLowerCase();
-        if (lower.includes('race')) {
-          return { bg: 'rgba(204, 255, 0, 0.2)', border: '#ccff00', color: '#ccff00' };
-        }
-        if (lower.includes('interval') || lower.includes('speed')) {
-          return { bg: 'rgba(239, 68, 68, 0.25)', border: '#ef4444', color: '#f87171' };
-        }
-        if (lower.includes('long')) {
-          return { bg: 'rgba(147, 51, 234, 0.25)', border: '#a855f7', color: '#c084fc' };
-        }
-        if (lower.includes('tempo') || lower.includes('steady')) {
-          return { bg: 'rgba(217, 119, 6, 0.25)', border: '#f59e0b', color: '#fbbf24' };
-        }
-        if (lower.includes('recovery')) {
-          return { bg: 'rgba(16, 185, 129, 0.25)', border: '#10b981', color: '#34d399' };
-        }
-        return { bg: 'rgba(2, 132, 199, 0.25)', border: '#0284c7', color: '#38bdf8' };
-      },
-
-      getWorkoutDescription = (type, targetPace, done) => {
-        if (done) return 'Workout completed & logged in history';
-        let lower = String(type || '').toLowerCase();
-        if (lower.includes('recovery')) {
-          return 'Easy 3-5 mile effort • Keep pace light, no faster than ' + targetPace + '/km';
-        }
-        if (lower.includes('interval') || lower.includes('speed')) {
-          return 'Warm-up 1.5km • 5x 400m at ' + targetPace + '/km (90s walking rest) • Cool down 1km';
-        }
-        if (lower.includes('tempo') || lower.includes('steady')) {
-          return 'Sustained 3-6 miles at conversational tempo pace • Focus on rhythm';
-        }
-        if (lower.includes('long')) {
-          return 'Weekly Progression Long Run • Maintain steady aerobic pace throughout';
-        }
-        if (lower.includes('race')) {
-          return 'Tune-up race day • Practice race strategy, pacing & fueling';
-        }
-        return '3-5 miles comfortable pace • Conversational effort throughout';
-      },
       
       fresh = () => ({ plans: [], runs: [], activePlanId: null, sessionDateOverrides: {}, lastSyncedPlanHash: '' });
 
@@ -286,7 +245,6 @@ function App() {
         [editing, E] = useState(null),
         [notice, N] = useState(''),
         [busy, B] = useState(false),
-        [expandedWeeks, setExpandedWeeks] = useState({ 1: true }),
         
         [form, F] = useState({ 
           name: '', 
@@ -427,22 +385,6 @@ function App() {
     }, {});
   }, [plan]);
 
-  function toggleWeekExpand(wNum) {
-    setExpandedWeeks(prev => ({ ...prev, [wNum]: !prev[wNum] }));
-  }
-
-  function handleDateChange(sessionId, newDate) {
-    if (!newDate) return;
-    S(s => ({
-      ...s,
-      sessionDateOverrides: {
-        ...(s.sessionDateOverrides || {}),
-        [sessionId]: newDate
-      }
-    }));
-    N('Workout rescheduled.');
-  }
-
   function exportPDF() {
     if (!plan) return;
     window.print();
@@ -468,7 +410,7 @@ function App() {
         `DTSTART;VALUE=DATE:${dClean}`,
         `DTEND;VALUE=DATE:${dClean}`,
         `SUMMARY:[Stride] ${s.type} (${s.km} km)`,
-        `DESCRIPTION:Target Pace: ${s.pace}/km. ${getWorkoutDescription(s.type, s.pace, s.done)}`,
+        `DESCRIPTION:Target Pace: ${s.pace}/km.`,
         'END:VEVENT'
       );
     });
@@ -837,32 +779,6 @@ function App() {
                 </div>
               </div>
 
-              {/* AI RACE PREDICTOR CARD */}
-              <section className="panel" style={{ marginBottom: '24px' }}>
-                <div className="panelhead">
-                  <div>
-                    <small className="eyebrow" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><Zap size={14}/> AI RACE PREDICTOR</small>
-                    <h3>Estimated Race Finishing Times</h3>
-                  </div>
-                  <small className="pill">
-                    {predictions ? `Based on ${predictions.totalRunsAnalyzed} logged runs${predictions.avgHr ? ' (Avg HR: ' + predictions.avgHr + ' bpm)' : ''}` : 'Log runs to calibrate'}
-                  </small>
-                </div>
-                {predictions ? (
-                  <div className="predictor-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '16px', marginTop: '12px' }}>
-                    {Object.entries(predictions.results).map(([dist, data]) => (
-                      <div key={dist} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '16px' }}>
-                        <small style={{ color: '#a1a1aa', fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{dist}</small>
-                        <div style={{ fontSize: '1.5rem', fontWeight: 700, margin: '6px 0', color: '#ccff00' }}>{data.time}</div>
-                        <small style={{ color: '#71717a' }}>Avg pace: {data.pace}/km</small>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="muted" style={{ padding: '12px 0' }}>Log at least one run of 3km+ with duration to generate your predicted times.</p>
-                )}
-              </section>
-
               <div className="stats">
                 <Stat I={Footprints} label="Total distance" value={total.toFixed(1) + ' km'} note="All logged runs"/>
                 <Stat I={CalendarDays} label="This month" value={month.toFixed(1) + ' km'} note="Current month"/>
@@ -899,190 +815,38 @@ function App() {
             <Empty title="No plan just yet" text="Set a race date and target time to build your first training schedule." action="Create a plan" click={openNewPlan}/>
           ) : (
             <>
-              <div className="plansummary" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+              <div className="plansummary">
                 <div>
                   <small className="eyebrow">YOUR RACE</small>
                   <h2>{plan.name}</h2>
                   <p>{plan.distance} · {fmt(plan.raceDate, { day: 'numeric', month: 'long', year: 'numeric' })} · Goal {plan.goalTime}</p>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                  <div><small>Target pace</small><b>{pace(plan.goalPace)} <em>/km</em></b></div>
-                  <button className="btn secondary" onClick={exportPDF} style={{ gap: '6px' }}><FileText size={15}/> PDF</button>
-                  <button className="btn secondary" onClick={syncCalendar} style={{ gap: '6px', borderColor: isPlanOutdated ? '#ccff00' : undefined }}><Calendar size={15}/> {state.lastSyncedPlanHash ? 'Sync' : 'Sync Cal'}</button>
-                  <button className="btn secondary" onClick={openEditPlan} style={{ gap: '6px' }}><Pencil size={15}/> Edit</button>
-                  <button className="btn secondary" onClick={() => deletePlan()} style={{ gap: '6px', color: '#ef4444' }}><Trash size={15}/> Delete</button>
+                <div>
+                  <small>Target pace</small>
+                  <b>{pace(plan.goalPace)} <em>/km</em></b>
                 </div>
               </div>
-
-              {/* WEEKLY CARD CONTAINER */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {Object.entries(weeksGrouped).map(([weekNum, sessions]) => {
-                  let isExpanded = expandedWeeks[weekNum] ?? (Number(weekNum) === 1);
-                  let weekDoneCount = sessions.filter(s => s.done).length;
-                  let isWeekComplete = weekDoneCount === sessions.length && sessions.length > 0;
-                  
-                  let targetWeekKm = sessions.reduce((sum, s) => sum + s.km, 0);
-                  let completedWeekKm = sessions.filter(s => s.done).reduce((sum, s) => sum + s.km, 0);
-
-                  return (
-                    <div 
-                      key={weekNum} 
-                      style={{ 
-                        background: '#121614', 
-                        border: isWeekComplete ? '2px solid #ccff00' : isExpanded ? '2px solid #38bdf8' : '1px solid rgba(255,255,255,0.1)', 
-                        borderRadius: '16px', 
-                        padding: '20px',
-                        boxShadow: isExpanded ? '0 8px 24px rgba(0,0,0,0.4)' : 'none',
-                        transition: 'all 0.2s ease'
-                      }}
-                    >
-                      {/* CARD HEADER */}
-                      <div 
-                        onClick={() => toggleWeekExpand(weekNum)}
-                        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
-                      >
-                        <div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                            <h3 style={{ fontSize: '1.35rem', fontWeight: 700, margin: 0, color: '#f4f4f5' }}>Week {weekNum}</h3>
-                            {isWeekComplete ? (
-                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#ccff00', color: '#090a09', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 700 }}>
-                                <CheckCircle2 size={13}/> COMPLETE
-                              </span>
-                            ) : (
-                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 600 }}>
-                                IN PROGRESS
-                              </span>
-                            )}
-                          </div>
-
-                          <div style={{ display: 'flex', gap: '24px', marginTop: '10px', color: '#a1a1aa', fontSize: '0.85rem', flexWrap: 'wrap' }}>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <Footprints size={15} style={{ color: '#38bdf8' }}/> 
-                              WORKOUTS: <strong style={{ color: '#f4f4f5' }}>{weekDoneCount}/{sessions.length}</strong>
-                            </span>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <Activity size={15} style={{ color: '#ccff00' }}/> 
-                              DISTANCE: <strong style={{ color: '#f4f4f5' }}>{completedWeekKm.toFixed(1)} / {targetWeekKm.toFixed(1)}KM</strong>
-                            </span>
-                          </div>
-                        </div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                          <button className="btn secondary icononly" style={{ borderRadius: '50%', padding: '8px' }}>
-                            {isExpanded ? <ChevronUp size={18}/> : <ChevronDown size={18}/>}
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* DAILY WORKOUT LIST WITH INLINE DATE RESCHEDULING */}
-                      {isExpanded && (
-                        <div style={{ marginTop: '20px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                          {sessions.map(s => {
-                            let badgeStyle = getWorkoutBadgeStyle(s.type);
-                            let description = getWorkoutDescription(s.type, s.pace, s.done);
-
-                            return (
-                              <div 
-                                key={s.id}
-                                className="workout-row"
-                                style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'space-between',
-                                  background: s.done ? 'rgba(255,255,255,0.01)' : 'rgba(255,255,255,0.03)',
-                                  padding: '14px 16px',
-                                  borderRadius: '10px',
-                                  border: s.done ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(255,255,255,0.1)',
-                                  opacity: s.done ? 0.45 : 1,
-                                  filter: s.done ? 'grayscale(0.3)' : 'none',
-                                  transition: 'all 0.2s ease',
-                                  flexWrap: 'wrap',
-                                  gap: '10px'
-                                }}
-                              >
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: '150px' }}>
-                                  <span style={{ color: s.done ? '#71717a' : '#a1a1aa', fontWeight: 600, fontSize: '0.85rem' }}>
-                                    {fmt(s.date, { weekday: 'short' })}
-                                  </span>
-                                  <input 
-                                    type="date"
-                                    value={s.date}
-                                    onChange={e => handleDateChange(s.id, e.target.value)}
-                                    style={{
-                                      background: 'rgba(255,255,255,0.06)',
-                                      border: '1px solid rgba(255,255,255,0.15)',
-                                      borderRadius: '6px',
-                                      color: '#f4f4f5',
-                                      padding: '4px 8px',
-                                      fontSize: '0.82rem',
-                                      fontWeight: 600,
-                                      cursor: 'pointer'
-                                    }}
-                                    title="Click to reschedule run date"
-                                  />
-                                </div>
-
-                                <div style={{ flex: 1, padding: '0 16px', display: 'flex', flexDirection: 'column', gap: '6px', minWidth: '220px' }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                                    <span style={{
-                                      background: badgeStyle.bg,
-                                      border: `1px solid ${badgeStyle.border}`,
-                                      color: badgeStyle.color,
-                                      padding: '3px 10px',
-                                      borderRadius: '8px',
-                                      fontWeight: 700,
-                                      fontSize: '0.82rem',
-                                      letterSpacing: '0.02em'
-                                    }}>
-                                      {s.type}
-                                    </span>
-                                    <small style={{ color: '#71717a', fontSize: '0.78rem' }}>
-                                      {s.done ? `Logged Pace: ${s.pace}/km` : s.race ? 'Main Goal Event' : `Target Pace: ${s.pace}/km`}
-                                    </small>
-                                  </div>
-
-                                  <div style={{ color: '#a1a1aa', fontSize: '0.8rem', lineHeight: '1.3' }}>
-                                    {description}
-                                  </div>
-                                </div>
-
-                                <div style={{ paddingRight: '20px', textAlign: 'right' }}>
-                                  <b style={{ fontSize: '1rem', color: badgeStyle.color }}>{s.km} km</b>
-                                </div>
-
-                                <button 
-                                  onClick={() => toggle(s.id)}
-                                  style={{
-                                    width: '26px',
-                                    height: '26px',
-                                    borderRadius: '6px',
-                                    border: s.done ? '2px solid #ccff00' : '2px solid rgba(255,255,255,0.2)',
-                                    background: s.done ? '#ccff00' : 'transparent',
-                                    color: s.done ? '#090a09' : 'transparent',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    cursor: 'pointer',
-                                    transition: 'all 0.15s ease'
-                                  }}
-                                >
-                                  {s.done ? <Check size={16} strokeWidth={3}/> : null}
-                                </button>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
+              <div className="notice"><Sparkles size={16}/><p>Schedule generated based on your goal race and weekly mileage. Check off runs as you complete them.</p></div>
+              
+              <div className="sessions">
+                {plan.schedule.map(s => (
+                  <div key={s.id} className={'plansession ' + (s.race ? 'raceday ' : '') + (s.done ? 'isdone' : '')}>
+                    <div className="date"><small>{fmt(s.date, { weekday: 'short' })}</small><b>{fmt(s.date)}</b></div>
+                    <div className="sessiontext">
+                      <b>{s.type}</b>
+                      <small>Week {s.week} · Target pace {s.pace}/km</small>
                     </div>
-                  );
-                })}
+                    <div className="dist"><b>{s.km} km</b><small>{s.race ? 'Goal race' : 'Planned'}</small></div>
+                    <button className={'check ' + (s.done ? 'checked' : '')} onClick={() => toggle(s.id)}>{s.done ? <Check size={14}/> : ''}</button>
+                  </div>
+                ))}
               </div>
             </>
           ))}
 
           {tab === 'Run log' && (
             <>
-              <div className="runstats" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))' }}>
+              <div className="runstats">
                 <div><small>Total runs</small><b>{state.runs.length}</b></div>
                 <div><small>Lifetime distance</small><b>{total.toFixed(1)} <em>km</em></b></div>
                 <div><small>Monthly distance</small><b>{month.toFixed(1)} <em>km</em></b></div>
@@ -1091,56 +855,29 @@ function App() {
               <section className="panel logpanel">
                 <div className="panelhead"><div><small className="eyebrow">YOUR HISTORY</small><h3>All runs</h3></div><small className="pill">{runs.length} logged</small></div>
                 {runs.length ? (
-                  <>
-                    {/* DESKTOP TABLE VIEW */}
-                    <div className="tablewrap desktop-run-table">
-                      <table>
-                        <thead><tr><th>DATE</th><th>ACTIVITY</th><th>DISTANCE</th><th>TIME</th><th>AVG. PACE</th><th>AVG. HR</th><th></th></tr></thead>
-                        <tbody>
-                          {runs.map(r => (
-                            <tr key={r.id}>
-                              <td>{fmt(r.date, { day: 'numeric', month: 'short', year: 'numeric' })}</td>
-                              <td><b>🏃 Run</b>{r.notes && <small className="notes">{r.notes}</small>}</td>
-                              <td>{Number(r.distance).toFixed(2)} km</td>
-                              <td>{r.duration || '—'}</td>
-                              <td>{r.pace ? r.pace + '/km' : '—'}</td>
-                              <td>{r.hr ? r.hr + ' bpm' : '—'}</td>
-                              <td>
-                                <div className="actions">
-                                  <button onClick={() => openRun(r)}>Edit</button>
-                                  <button onClick={() => { if (confirm('Delete this run?')) S(s => ({ ...s, runs: s.runs.filter(x => x.id !== r.id) })); }}><Trash2 size={14}/></button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {/* MOBILE CARD VIEW */}
-                    <div className="mobile-run-cards" style={{ display: 'none', flexDirection: 'column', gap: '12px' }}>
-                      {runs.map(r => (
-                        <div key={r.id} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ fontSize: '0.8rem', color: '#71717a', fontWeight: 600 }}>{fmt(r.date, { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-                            <b style={{ color: '#ccff00', fontSize: '1.1rem' }}>{Number(r.distance).toFixed(2)} km</b>
-                          </div>
-                          <div>
-                            <b style={{ fontSize: '0.95rem' }}>🏃 Run {r.notes ? `(${r.notes})` : ''}</b>
-                          </div>
-                          <div style={{ display: 'flex', gap: '16px', fontSize: '0.82rem', color: '#a1a1aa', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '8px' }}>
-                            <span>Time: <strong style={{ color: '#f4f4f5' }}>{r.duration || '—'}</strong></span>
-                            <span>Pace: <strong style={{ color: '#f4f4f5' }}>{r.pace ? r.pace + '/km' : '—'}</strong></span>
-                            <span>HR: <strong style={{ color: '#f4f4f5' }}>{r.hr ? r.hr + ' bpm' : '—'}</strong></span>
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '4px' }}>
-                            <button className="btn secondary" style={{ padding: '4px 12px', fontSize: '0.78rem' }} onClick={() => openRun(r)}>Edit</button>
-                            <button className="btn secondary" style={{ padding: '4px 12px', fontSize: '0.78rem', color: '#ef4444' }} onClick={() => { if (confirm('Delete this run?')) S(s => ({ ...s, runs: s.runs.filter(x => x.id !== r.id) })); }}>Delete</button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </>
+                  <div className="tablewrap">
+                    <table>
+                      <thead><tr><th>DATE</th><th>ACTIVITY</th><th>DISTANCE</th><th>TIME</th><th>AVG. PACE</th><th>AVG. HR</th><th></th></tr></thead>
+                      <tbody>
+                        {runs.map(r => (
+                          <tr key={r.id}>
+                            <td>{fmt(r.date, { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                            <td><b>🏃 Run</b>{r.notes && <small className="notes">{r.notes}</small>}</td>
+                            <td>{Number(r.distance).toFixed(2)} km</td>
+                            <td>{r.duration || '—'}</td>
+                            <td>{r.pace ? r.pace + '/km' : '—'}</td>
+                            <td>{r.hr ? r.hr + ' bpm' : '—'}</td>
+                            <td>
+                              <div className="actions">
+                                <button onClick={() => openRun(r)}>Edit</button>
+                                <button onClick={() => { if (confirm('Delete this run?')) S(s => ({ ...s, runs: s.runs.filter(x => x.id !== r.id) })); }}><Trash2 size={14}/></button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 ) : (
                   <Empty title="Your log starts with one run" text="Add a run manually or scan a screenshot from Strava or another running app." action="Log your first run" click={() => openRun()}/>
                 )}
