@@ -64,7 +64,6 @@ const KEY = 'stride-running-coach-v1',
         if (lower.includes('interval') || lower.includes('speed')) {
           return { bg: 'rgba(239, 68, 68, 0.2)', border: '#ef4444', color: '#f87171' };
         }
-        // Default Easy Run / Long Run
         return { bg: 'rgba(56, 189, 248, 0.15)', border: '#38bdf8', color: '#38bdf8' };
       },
       
@@ -343,11 +342,11 @@ function App() {
         if (loggedRun) {
           let dist = Number(loggedRun.distance);
           let pVal = loggedRun.pace || pace(parseTime(loggedRun.duration) / dist);
+          // Preserve the planned session type so color-coding remains intact even when logged!
           weekSessions.push({
             ...ps,
             km: dist,
             pace: pVal,
-            type: loggedRun.notes || ps.type,
             done: true
           });
         } else {
