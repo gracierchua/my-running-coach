@@ -108,7 +108,7 @@ function predictRaceTimes(runs) {
   return { results, baseline: bestRun };
 }
 
-// BASE SCHEDULE CALCULATOR
+// PLAN GENERATOR WITH DYNAMIC TARGET-DAY ADJUSTMENT AND ANCHORED MONDAY
 function makePlan(p, userRuns = []) {
   let km = KM[p.distance] || 42.195,
       race = new Date(p.raceDate + 'T12:00:00'),
@@ -119,6 +119,7 @@ function makePlan(p, userRuns = []) {
       diffToMonday = (dayOfWeek === 0 ? -6 : 1 - dayOfWeek);
   monday.setDate(monday.getDate() + diffToMonday);
 
+  let mondayStr = monday.toISOString().slice(0, 10);
   let weeks = Math.max(4, Math.min(24, Math.ceil((race - monday) / 604800000))),
       selectedSlots = Array.isArray(p.runDays) && p.runDays.length > 0 
         ? [...p.runDays].sort((a, b) => a - b)
@@ -139,7 +140,6 @@ function makePlan(p, userRuns = []) {
   let buildWeeks = Math.max(1, weeks - 3);
 
   let interRaces = Array.isArray(p.intermediateRaces) ? p.intermediateRaces : [];
-  let insertedDates = new Set();
 
   for (let w = 0; w < weeks; w++) {
     let left = weeks - w;
@@ -186,7 +186,6 @@ function makePlan(p, userRuns = []) {
             done: false,
             intermediate: true
           });
-          insertedDates.add(ds);
         } else {
           let isLongRun = i === selectedSlots.length - 1;
           let d = long;
@@ -232,29 +231,10 @@ function makePlan(p, userRuns = []) {
             pace: sessionPace,
             done: false
           });
-          insertedDates.add(ds);
         }
       }
     });
   }
-
-  interRaces.forEach(r => {
-    if (r.date && r.date < p.raceDate && !insertedDates.has(r.date)) {
-      let rDate = new Date(r.date + 'T12:00:00');
-      let wNum = Math.max(1, Math.ceil((rDate - monday) / 604800000));
-      let raceKm = KM[r.distance] || Number(r.distance) || 10;
-      schedule.push({
-        id: uid(),
-        date: r.date,
-        week: wNum,
-        km: raceKm,
-        type: `🏆 TUNE-UP RACE (${r.name || r.distance})`,
-        pace: pace(calibratedGP * 0.95),
-        done: false,
-        intermediate: true
-      });
-    }
-  });
 
   schedule.push({ 
     id: uid(), 
@@ -269,7 +249,7 @@ function makePlan(p, userRuns = []) {
 
   schedule.sort((a, b) => a.date.localeCompare(b.date));
 
-  return { ...p, schedule, weeks, goalPace: gp, mondayDate: monday.toISOString().slice(0, 10) };
+  return { ...p, schedule, weeks, goalPace: gp, mondayDate: mondayStr };
 }
 
 function App() {
@@ -317,57 +297,99 @@ function App() {
         return d >= start && d <= n;
       }).reduce((s, r) => s + Number(r.distance), 0);
 
-  // FULLY DYNAMIC: OVERRIDE TARGET PLAN WITH ACTUAL RUN LOG ENTRIES FOR ANY WEEK
+  // DYNAMIC FILTER & SCHEDULE MERGE:
+  // Week 1 starts on the current week's Monday. Historical runs before Week 1 Monday stay in Run Log only.
+  // Within each week, past unlogged target days are removed if runs were completed on other days.
   const plan = useMemo(() => {
     if (!rawPlan) return null;
     let basePlan = makePlan(rawPlan, state.runs);
+    let planStartMonday = basePlan.mondayDate;
+
+    // Filter runs that occurred ON OR AFTER Plan Start Monday
+    let planRuns = state.runs.filter(r => r.date >= planStartMonday);
+    
+    // Group logged runs by date
     let runLogMap = new Map();
-    state.runs.forEach(r => runLogMap.set(r.date, r));
+    planRuns.forEach(r => runLogMap.set(r.date, r));
 
-    let mondayObj = new Date(basePlan.mondayDate + 'T12:00:00');
-    let insertedDates = new Set();
+    let finalSchedule = [];
+    let curToday = today();
 
-    let mergedSchedule = basePlan.schedule.map(session => {
-      insertedDates.add(session.date);
-      let logged = runLogMap.get(session.date);
-      if (logged) {
-        let loggedDist = Number(logged.distance);
-        let loggedPaceVal = logged.pace || pace(parseTime(logged.duration) / loggedDist);
-        return {
-          ...session,
-          km: loggedDist,
-          pace: loggedPaceVal,
-          type: logged.notes || session.type,
-          done: true,
-          isOverride: true
-        };
-      }
-      return session;
+    // Group base schedule by week
+    let baseWeeksMap = {};
+    basePlan.schedule.forEach(item => {
+      let w = item.week || 1;
+      if (!baseWeeksMap[w]) baseWeeksMap[w] = [];
+      baseWeeksMap[w].push(item);
     });
 
-    // DYNAMICALLY INSERT UNPLANNED LOGGED RUNS INTO THEIR RESPECTIVE WEEK CARDS
-    state.runs.forEach(r => {
-      if (r.date && r.date < basePlan.raceDate && !insertedDates.has(r.date)) {
-        let rDate = new Date(r.date + 'T12:00:00');
-        let wNum = Math.max(1, Math.ceil((rDate - mondayObj) / 604800000));
-        let dist = Number(r.distance);
-        let runPace = r.pace || pace(parseTime(r.duration) / dist);
-        mergedSchedule.push({
-          id: uid(),
-          date: r.date,
-          week: wNum,
-          km: dist,
-          type: r.notes || 'Logged run',
-          pace: runPace,
-          done: true,
-          isOverride: true
-        });
-        insertedDates.add(r.date);
-      }
+    Object.entries(baseWeeksMap).forEach(([wNum, plannedSessions]) => {
+      let weekNumber = Number(wNum);
+      
+      // Compute Monday date for this specific week
+      let mondayObj = new Date(planStartMonday + 'T12:00:00');
+      mondayObj.setDate(mondayObj.getDate() + (weekNumber - 1) * 7);
+      let weekMonStr = mondayObj.toISOString().slice(0, 10);
+
+      let sundayObj = new Date(mondayObj);
+      sundayObj.setDate(sundayObj.getDate() + 6);
+      let weekSunStr = sundayObj.toISOString().slice(0, 10);
+
+      // Get all runs logged during this specific week
+      let loggedInWeek = planRuns.filter(r => r.date >= weekMonStr && r.date <= weekSunStr);
+      let loggedDatesInWeek = new Set(loggedInWeek.map(r => r.date));
+
+      let weekSessions = [];
+      let processedPlannedDates = new Set();
+
+      // Process planned target days
+      plannedSessions.forEach(ps => {
+        processedPlannedDates.add(ps.date);
+        let loggedRun = runLogMap.get(ps.date);
+
+        if (loggedRun) {
+          let dist = Number(loggedRun.distance);
+          let pVal = loggedRun.pace || pace(parseTime(loggedRun.duration) / dist);
+          weekSessions.push({
+            ...ps,
+            km: dist,
+            pace: pVal,
+            type: loggedRun.notes || ps.type,
+            done: true
+          });
+        } else {
+          // IF PAST DAY AND UNLOGGED: Only include if we haven't already fulfilled workouts, or show upcoming future ones
+          if (ps.date < curToday) {
+            // Unlogged past target day -> hide so target day isn't treated as rigid fixed obligation
+          } else {
+            // Future upcoming target day -> keep as planned workout
+            weekSessions.push(ps);
+          }
+        }
+      });
+
+      // Insert any runs logged on unscheduled days during this week
+      loggedInWeek.forEach(r => {
+        if (!processedPlannedDates.has(r.date)) {
+          let dist = Number(r.distance);
+          let pVal = r.pace || pace(parseTime(r.duration) / dist);
+          weekSessions.push({
+            id: uid(),
+            date: r.date,
+            week: weekNumber,
+            km: dist,
+            type: r.notes || 'Logged run',
+            pace: pVal,
+            done: true
+          });
+        }
+      });
+
+      weekSessions.sort((a, b) => a.date.localeCompare(b.date));
+      finalSchedule.push(...weekSessions);
     });
 
-    mergedSchedule.sort((a, b) => a.date.localeCompare(b.date));
-    return { ...basePlan, schedule: mergedSchedule };
+    return { ...basePlan, schedule: finalSchedule };
   }, [rawPlan, state.runs]);
 
   let done = plan?.schedule?.filter(s => s.done).length || 0,
