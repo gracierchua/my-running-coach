@@ -10,6 +10,15 @@ import './styles.css';
 
 const KEY = 'stride-running-coach-v1', 
       KM = { '5K': 5, '10K': 10, 'Half Marathon': 21.0975, 'Marathon': 42.195 },
+      DAYS_OF_WEEK = [
+        { label: 'Mon', val: 0 },
+        { label: 'Tue', val: 1 },
+        { label: 'Wed', val: 2 },
+        { label: 'Thu', val: 3 },
+        { label: 'Fri', val: 4 },
+        { label: 'Sat', val: 5 },
+        { label: 'Sun', val: 6 }
+      ],
       today = () => new Date().toISOString().slice(0, 10),
       uid = () => Math.random().toString(36).slice(2, 10),
       fmt = (d, o = { day: 'numeric', month: 'short' }) => d ? new Date(d + 'T12:00:00').toLocaleDateString('en-SG', o) : '—',
@@ -99,7 +108,7 @@ function predictRaceTimes(runs) {
   return { results, baseline: bestRun };
 }
 
-// GENERATOR: PACES CALCULATED DYNAMICALLY FROM GOAL PACE & USER RUN LOG DATA
+// GENERATOR: INCLUDES CUSTOM RUNNING DAYS & GUARANTEED INTERMEDIATE RACES
 function makePlan(p, userRuns = []) {
   let km = KM[p.distance] || 42.195,
       race = new Date(p.raceDate + 'T12:00:00'),
@@ -111,19 +120,19 @@ function makePlan(p, userRuns = []) {
   monday.setDate(monday.getDate() + diffToMonday);
 
   let weeks = Math.max(4, Math.min(24, Math.ceil((race - monday) / 604800000))),
-      days = Number(p.daysPerWeek),
-      slots = days === 3 ? [1, 3, 6] : days === 4 ? [1, 3, 5, 6] : days === 5 ? [1, 2, 4, 5, 6] : [0, 1, 3, 4, 5, 6],
       
-      // Calculate Goal Pace (GP) from goal finish time
+      // Selected custom run days (e.g. [1, 3, 6] for Tue, Thu, Sun)
+      selectedSlots = Array.isArray(p.runDays) && p.runDays.length > 0 
+        ? [...p.runDays].sort((a, b) => a - b)
+        : [1, 3, 5, 6],
+      
       gp = parseTime(p.goalTime) / km,
       schedule = [];
 
-  // Calibrate pace relative to user's best recent run if logged
   let validLogged = userRuns.filter(r => Number(r.distance) >= 3 && parseTime(r.duration) > 0);
   let calibratedGP = gp;
   if (validLogged.length > 0) {
     let recentPaceSec = validLogged.reduce((sum, r) => sum + (parseTime(r.duration) / Number(r.distance)), 0) / validLogged.length;
-    // Blend target pace and actual performance 70/30 for realistic training targets
     calibratedGP = (gp * 0.70) + (recentPaceSec * 0.30);
   }
 
@@ -133,6 +142,7 @@ function makePlan(p, userRuns = []) {
   let buildWeeks = Math.max(1, weeks - 3);
 
   let interRaces = Array.isArray(p.intermediateRaces) ? p.intermediateRaces : [];
+  let insertedDates = new Set();
 
   for (let w = 0; w < weeks; w++) {
     let left = weeks - w;
@@ -157,9 +167,9 @@ function makePlan(p, userRuns = []) {
     }
 
     long = Math.round(long * 2) / 2;
-    let midweekTotal = Math.max(12.0, weekKm - long);
+    let midweekTotal = Math.max(10.0, weekKm - long);
 
-    slots.forEach((dayOffset, i) => {
+    selectedSlots.forEach((dayOffset, i) => {
       let date = new Date(monday);
       date.setDate(monday.getDate() + w * 7 + dayOffset);
       let ds = date.toISOString().slice(0, 10);
@@ -179,27 +189,28 @@ function makePlan(p, userRuns = []) {
             done: false,
             intermediate: true
           });
+          insertedDates.add(ds);
         } else {
-          let isLongRun = i === slots.length - 1;
+          let isLongRun = i === selectedSlots.length - 1;
           let d = long;
           let type = 'Long easy run';
-          let sessionPace = pace(calibratedGP * 1.18); // Dynamic Zone 2 Easy Pace
+          let sessionPace = pace(calibratedGP * 1.18);
 
           if (!isLongRun) {
             if (i === 0) {
               d = Math.round(Math.max(4.0, Math.min(8.0, midweekTotal * 0.22)) * 2) / 2;
               type = 'Recovery run';
-              sessionPace = pace(calibratedGP * 1.25); // Dynamic Recovery Pace
+              sessionPace = pace(calibratedGP * 1.25);
             } else if (i === 1) {
               let isIntervalWeek = w % 2 === 1;
               if (isIntervalWeek) {
                 d = Math.round(Math.max(6.0, Math.min(10.0, midweekTotal * 0.26)) * 2) / 2;
                 type = 'Intervals (Speed)';
-                sessionPace = pace(calibratedGP * 0.88); // Dynamic VO2max Pace (~12% faster than GP)
+                sessionPace = pace(calibratedGP * 0.88);
               } else {
                 d = Math.round(Math.max(6.0, Math.min(12.0, midweekTotal * 0.28)) * 2) / 2;
                 type = 'Steady / tempo';
-                sessionPace = pace(calibratedGP * 0.96); // Dynamic Threshold Pace (~4% faster than GP)
+                sessionPace = pace(calibratedGP * 0.96);
               }
             } else {
               let usedMidweek = (Math.round(Math.max(4.0, Math.min(8.0, midweekTotal * 0.22)) * 2) / 2) + 
@@ -224,10 +235,30 @@ function makePlan(p, userRuns = []) {
             pace: sessionPace,
             done: false
           });
+          insertedDates.add(ds);
         }
       }
     });
   }
+
+  // FORCE INJECT ANY UNMATCHED INTERMEDIATE RACES SO THEY ARE NEVER REMOVED
+  interRaces.forEach(r => {
+    if (r.date && r.date >= today() && r.date < p.raceDate && !insertedDates.has(r.date)) {
+      let rDate = new Date(r.date + 'T12:00:00');
+      let wNum = Math.max(1, Math.ceil((rDate - monday) / 604800000));
+      let raceKm = KM[r.distance] || Number(r.distance) || 10;
+      schedule.push({
+        id: uid(),
+        date: r.date,
+        week: wNum,
+        km: raceKm,
+        type: `🏆 TUNE-UP RACE (${r.name || r.distance})`,
+        pace: pace(calibratedGP * 0.95),
+        done: false,
+        intermediate: true
+      });
+    }
+  });
 
   schedule.push({ id: uid(), date: p.raceDate, week: weeks, km, type: 'GOAL RACE DAY', pace: pace(gp), done: false, race: true });
 
@@ -251,7 +282,7 @@ function App() {
           goalTime: '4:30:00', 
           raceDate: '', 
           weeklyKm: '30', 
-          daysPerWeek: '4',
+          runDays: [1, 3, 5, 6],
           intermediateRaces: []
         }),
         [newInterRace, setNewInterRace] = useState({ name: '', distance: '10K', date: '' }),
@@ -306,7 +337,7 @@ function App() {
       goalTime: '4:30:00', 
       raceDate: '', 
       weeklyKm: '30', 
-      daysPerWeek: '4',
+      runDays: [1, 3, 5, 6],
       intermediateRaces: []
     });
     setNewInterRace({ name: '', distance: '10K', date: '' });
@@ -321,11 +352,22 @@ function App() {
       goalTime: plan.goalTime || '4:30:00',
       raceDate: plan.raceDate || '',
       weeklyKm: String(plan.weeklyKm || '30'),
-      daysPerWeek: String(plan.daysPerWeek || '4'),
+      runDays: Array.isArray(plan.runDays) ? plan.runDays : [1, 3, 5, 6],
       intermediateRaces: plan.intermediateRaces || []
     });
     setNewInterRace({ name: '', distance: '10K', date: '' });
     M('editPlan');
+  }
+
+  function toggleRunDay(val) {
+    F(prev => {
+      let currentDays = Array.isArray(prev.runDays) ? prev.runDays : [];
+      let updated = currentDays.includes(val)
+        ? currentDays.filter(d => d !== val)
+        : [...currentDays, val];
+      if (updated.length === 0) return prev;
+      return { ...prev, runDays: updated };
+    });
   }
 
   function addIntermediateRace() {
@@ -374,7 +416,7 @@ function App() {
   function deletePlan(idToDelete) {
     let targetId = idToDelete || plan?.id;
     if (!targetId) return;
-    let targetPlan = state.plans.find(p => p.id !== targetId);
+    let targetPlan = state.plans.find(p => p.id === targetId);
 
     if (confirm(`Are you sure you want to delete "${targetPlan?.name || 'this plan'}"?`)) {
       S(s => {
@@ -541,7 +583,7 @@ function App() {
             <div className="empty">
               <div className="emptyicon"><Footprints size={38}/></div>
               <small className="eyebrow">YOUR NEXT CHAPTER</small>
-              長<h2>Every finish line starts somewhere.</h2>
+              <h2>Every finish line starts somewhere.</h2>
               <p>Create a running goal and Stride will map out a simple training schedule for you.</p>
               <button className="btn primary" onClick={openNewPlan}><Plus size={16}/> Create your first plan</button>
               <small className="subtle">No subscriptions. No account. Just your running journey.</small>
@@ -887,17 +929,52 @@ function App() {
                   <label>Race date<input type="date" min={today()} required value={form.raceDate} onChange={e => F({ ...form, raceDate: e.target.value })}/></label>
                 </div>
                 <label>Target finish time <small>H:MM:SS, or MM:SS for shorter races</small><input required value={form.goalTime} onChange={e => F({ ...form, goalTime: e.target.value })} placeholder="4:30:00"/></label>
+                
                 <div className="formrow">
                   <label>Current weekly distance (km)<input type="number" min="0" max="200" required value={form.weeklyKm} onChange={e => F({ ...form, weeklyKm: e.target.value })}/></label>
-                  <label>Runs per week<select value={form.daysPerWeek} onChange={e => F({ ...form, daysPerWeek: e.target.value })}>{[3, 4, 5, 6].map(n => <option key={n}>{n}</option>)}</select></label>
                 </div>
 
+                {/* SELECT SPECIFIC RUNNING DAYS */}
+                <div style={{ marginTop: '12px' }}>
+                  <label style={{ fontWeight: 600, fontSize: '0.88rem', color: '#f4f4f5', display: 'block', marginBottom: '8px' }}>
+                    Select your preferred running days:
+                  </label>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {DAYS_OF_WEEK.map(d => {
+                      let active = (form.runDays || []).includes(d.val);
+                      return (
+                        <button
+                          type="button"
+                          key={d.val}
+                          onClick={() => toggleRunDay(d.val)}
+                          style={{
+                            padding: '8px 14px',
+                            borderRadius: '8px',
+                            fontWeight: 700,
+                            fontSize: '0.85rem',
+                            border: active ? '1px solid #ccff00' : '1px solid rgba(255,255,255,0.15)',
+                            background: active ? 'rgba(204,255,0,0.15)' : 'rgba(255,255,255,0.03)',
+                            color: active ? '#ccff00' : '#a1a1aa',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {d.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <small style={{ color: '#71717a', fontSize: '0.78rem', display: 'block', marginTop: '6px' }}>
+                    {(form.runDays || []).length} days per week selected.
+                  </small>
+                </div>
+
+                {/* INTERMEDIATE TUNE-UP RACES */}
                 <div style={{ marginTop: '16px', padding: '16px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
                   <label style={{ fontWeight: 700, color: '#ccff00', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <Flag size={16}/> Intermediate Tune-Up Races (Optional)
                   </label>
                   <small style={{ color: '#a1a1aa', display: 'block', marginBottom: '12px' }}>
-                    Add 10K or 21K races scheduled during your training block. Stride will adjust that week's schedule around it.
+                    Add 10K or 21K races scheduled during your training block. Stride will include them regardless of your selected running days.
                   </small>
 
                   {(form.intermediateRaces || []).map(r => (
