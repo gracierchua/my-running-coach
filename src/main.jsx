@@ -108,7 +108,8 @@ function predictRaceTimes(runs) {
   return { results, baseline: bestRun };
 }
 
-function makePlan(p, userRuns = []) {
+// GENERATOR: INCLUDES ALL DAYS OF CURRENT WEEK (NO PAST-DAY TRUNCATION FOR CURRENT WEEK)
+function makePlan(p, userRuns = [], existingSchedule = []) {
   let km = KM[p.distance] || 42.195,
       race = new Date(p.raceDate + 'T12:00:00'),
       now = new Date(today() + 'T12:00:00'),
@@ -119,12 +120,21 @@ function makePlan(p, userRuns = []) {
   monday.setDate(monday.getDate() + diffToMonday);
 
   let weeks = Math.max(4, Math.min(24, Math.ceil((race - monday) / 604800000))),
+      
       selectedSlots = Array.isArray(p.runDays) && p.runDays.length > 0 
         ? [...p.runDays].sort((a, b) => a - b)
         : [1, 3, 5, 6],
       
       gp = parseTime(p.goalTime) / km,
       schedule = [];
+
+  // Map existing completed session status so completed status is preserved on rebuild
+  let doneStateMap = new Map();
+  if (Array.isArray(existingSchedule)) {
+    existingSchedule.forEach(s => {
+      if (s.date && s.done) doneStateMap.set(s.date, true);
+    });
+  }
 
   let validLogged = userRuns.filter(r => Number(r.distance) >= 3 && parseTime(r.duration) > 0);
   let calibratedGP = gp;
@@ -171,7 +181,8 @@ function makePlan(p, userRuns = []) {
       date.setDate(monday.getDate() + w * 7 + dayOffset);
       let ds = date.toISOString().slice(0, 10);
       
-      if (ds >= today() && ds < p.raceDate) {
+      // INCLUDE ALL DATES FROM MONDAY OF CURRENT WEEK ONWARDS
+      if (ds < p.raceDate) {
         let matchInterRace = interRaces.find(r => r.date === ds);
 
         if (matchInterRace) {
@@ -183,7 +194,7 @@ function makePlan(p, userRuns = []) {
             km: raceKm,
             type: `🏆 TUNE-UP RACE (${matchInterRace.name || matchInterRace.distance})`,
             pace: pace(calibratedGP * 0.95),
-            done: false,
+            done: doneStateMap.get(ds) || false,
             intermediate: true
           });
           insertedDates.add(ds);
@@ -230,7 +241,7 @@ function makePlan(p, userRuns = []) {
             km: d,
             type,
             pace: sessionPace,
-            done: false
+            done: doneStateMap.get(ds) || false
           });
           insertedDates.add(ds);
         }
@@ -238,8 +249,9 @@ function makePlan(p, userRuns = []) {
     });
   }
 
+  // GUARANTEE TUNE-UP RACES ARE INJECTED
   interRaces.forEach(r => {
-    if (r.date && r.date >= today() && r.date < p.raceDate && !insertedDates.has(r.date)) {
+    if (r.date && r.date < p.raceDate && !insertedDates.has(r.date)) {
       let rDate = new Date(r.date + 'T12:00:00');
       let wNum = Math.max(1, Math.ceil((rDate - monday) / 604800000));
       let raceKm = KM[r.distance] || Number(r.distance) || 10;
@@ -250,13 +262,22 @@ function makePlan(p, userRuns = []) {
         km: raceKm,
         type: `🏆 TUNE-UP RACE (${r.name || r.distance})`,
         pace: pace(calibratedGP * 0.95),
-        done: false,
+        done: doneStateMap.get(r.date) || false,
         intermediate: true
       });
     }
   });
 
-  schedule.push({ id: uid(), date: p.raceDate, week: weeks, km, type: 'GOAL RACE DAY', pace: pace(gp), done: false, race: true });
+  schedule.push({ 
+    id: uid(), 
+    date: p.raceDate, 
+    week: weeks, 
+    km, 
+    type: 'GOAL RACE DAY', 
+    pace: pace(gp), 
+    done: doneStateMap.get(p.raceDate) || false, 
+    race: true 
+  });
 
   schedule.sort((a, b) => a.date.localeCompare(b.date));
 
@@ -394,7 +415,7 @@ function App() {
     }
 
     if (modal === 'editPlan' && plan) {
-      let updated = makePlan({ ...plan, ...form }, state.runs);
+      let updated = makePlan({ ...plan, ...form }, state.runs, plan.schedule);
       S(s => ({
         ...s,
         plans: s.plans.map(p => p.id === plan.id ? updated : p)
@@ -412,7 +433,7 @@ function App() {
   function deletePlan(idToDelete) {
     let targetId = idToDelete || plan?.id;
     if (!targetId) return;
-    let targetPlan = state.plans.find(p => p.id === targetId);
+    let targetPlan = state.plans.find(p => p.id !== targetId);
 
     if (confirm(`Are you sure you want to delete "${targetPlan?.name || 'this plan'}"?`)) {
       S(s => {
@@ -807,7 +828,7 @@ function App() {
                                     color: s.done ? '#090a09' : 'transparent',
                                     display: 'flex',
                                     alignItems: 'center',
-                                    justifyContent: 'center',
+                                    justify: 'center',
                                     cursor: 'pointer',
                                     transition: 'all 0.15s ease'
                                   }}
