@@ -4,7 +4,7 @@ import {
   Activity, CalendarDays, Check, ChevronDown, Footprints, 
   LayoutDashboard, Plus, Target, Timer, Trophy, TrendingUp, 
   Settings2, ArrowDownToLine, ArrowUpFromLine, ImagePlus, 
-  Trash2, X, Sparkles, ListChecks, HeartPulse 
+  Trash2, X, Sparkles, ListChecks, HeartPulse, Pencil, Trash
 } from 'lucide-react';
 import './styles.css';
 
@@ -14,14 +14,12 @@ const KEY = 'stride-running-coach-v1',
       uid = () => Math.random().toString(36).slice(2, 10),
       fmt = (d, o = { day: 'numeric', month: 'short' }) => d ? new Date(d + 'T12:00:00').toLocaleDateString('en-SG', o) : '—',
       
-      // Formats seconds into MM:SS /km
       pace = n => {
         if (!Number.isFinite(n) || n <= 0) return '—';
         let t = Math.round(n);
         return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
       },
       
-      // Parses H:MM:SS or MM:SS into total SECONDS
       parseTime = s => {
         let p = String(s || '').split(':').map(Number);
         if (p.some(Number.isNaN)) return NaN;
@@ -47,8 +45,6 @@ function makePlan(p) {
       weeks = Math.max(4, Math.min(24, Math.ceil((race - now) / 604800000))),
       days = Number(p.daysPerWeek),
       slots = days === 3 ? [2, 4, 0] : days === 4 ? [2, 4, 6, 0] : days === 5 ? [1, 3, 5, 6, 0] : [1, 2, 4, 5, 0, 6],
-      
-      // Total seconds divided by distance = target seconds per km
       gp = parseTime(p.goalTime) / km,
       schedule = [];
 
@@ -117,18 +113,63 @@ function App() {
       done = plan?.schedule?.filter(s => s.done).length || 0,
       upcoming = plan?.schedule?.filter(s => !s.done && s.date >= today()).slice(0, 4) || [];
 
-  function newPlan(e) {
+  function openNewPlan() {
+    F({ name: '', distance: 'Marathon', goalTime: '4:30:00', raceDate: '', weeklyKm: '20', daysPerWeek: '4' });
+    M('plan');
+  }
+
+  function openEditPlan() {
+    if (!plan) return;
+    F({
+      name: plan.name || '',
+      distance: plan.distance || 'Marathon',
+      goalTime: plan.goalTime || '4:30:00',
+      raceDate: plan.raceDate || '',
+      weeklyKm: String(plan.weeklyKm || '20'),
+      daysPerWeek: String(plan.daysPerWeek || '4')
+    });
+    M('editPlan');
+  }
+
+  function savePlan(e) {
     e.preventDefault();
     if (!form.name.trim() || !form.raceDate || form.raceDate < today()) {
       N('Enter a plan name and future race date.');
       return;
     }
-    let p = makePlan({ ...form, id: uid() });
-    S(s => ({ ...s, plans: [p, ...s.plans], activePlanId: p.id }));
+
+    if (modal === 'editPlan' && plan) {
+      let updated = makePlan({ ...plan, ...form });
+      S(s => ({
+        ...s,
+        plans: s.plans.map(p => p.id === plan.id ? updated : p)
+      }));
+      N('Plan updated successfully.');
+    } else {
+      let p = makePlan({ ...form, id: uid() });
+      S(s => ({ ...s, plans: [p, ...s.plans], activePlanId: p.id }));
+      T('Plan');
+      N('Your suggested plan is ready.');
+    }
     M('');
-    T('Plan');
-    N('Your suggested plan is ready.');
-    F({ name: '', distance: 'Marathon', goalTime: '4:30:00', raceDate: '', weeklyKm: '20', daysPerWeek: '4' });
+  }
+
+  function deletePlan(idToDelete) {
+    let targetId = idToDelete || plan?.id;
+    if (!targetId) return;
+    let targetPlan = state.plans.find(p => p.id === targetId);
+
+    if (confirm(`Are you sure you want to delete "${targetPlan?.name || 'this plan'}"?`)) {
+      S(s => {
+        let remaining = s.plans.filter(p => p.id !== targetId);
+        return {
+          ...s,
+          plans: remaining,
+          activePlanId: remaining.length ? remaining[0].id : null
+        };
+      });
+      N('Plan deleted.');
+    }
   }
 
   function toggle(id) {
@@ -245,12 +286,20 @@ function App() {
           <div className="crumb">Workspace <i>/</i> <strong>{tab}</strong></div>
           <div className="topright">
             {plan && (
-              <div className="selector">
-                <Target size={15}/>
-                <select value={plan.id} onChange={e => S(s => ({ ...s, activePlanId: e.target.value }))}>
-                  {state.plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-                <ChevronDown size={13}/>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div className="selector">
+                  <Target size={15}/>
+                  <select value={plan.id} onChange={e => S(s => ({ ...s, activePlanId: e.target.value }))}>
+                    {state.plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                  <ChevronDown size={13}/>
+                </div>
+                <button className="btn secondary icononly" title="Edit Plan" onClick={openEditPlan} style={{ padding: '6px 8px' }}>
+                  <Pencil size={15}/>
+                </button>
+                <button className="btn secondary icononly" title="Delete Plan" onClick={() => deletePlan()} style={{ padding: '6px 8px', color: '#ef4444' }}>
+                  <Trash size={15}/>
+                </button>
               </div>
             )}
             <button className="avatar" onClick={() => T('Data & settings')}>S</button>
@@ -264,7 +313,7 @@ function App() {
               <p>{tab === 'Overview' ? 'A clear plan, a little consistency, and you’re on your way.' : tab === 'Plan' ? 'A flexible schedule built around your goal race.' : tab === 'Run log' ? 'Capture the miles, remember the effort, see your consistency.' : tab === 'Progress' ? 'A simple view of the consistency you’re building.' : 'Your plans and run log are saved locally in this browser.'}</p>
             </div>
             {['Overview', 'Plan', 'Run log'].includes(tab) && (
-              <button className="btn primary" onClick={() => tab === 'Run log' ? openRun() : M('plan')}>
+              <button className="btn primary" onClick={() => tab === 'Run log' ? openRun() : openNewPlan()}>
                 <Plus size={16}/>{tab === 'Run log' ? 'Log a run' : 'New goal'}
               </button>
             )}
@@ -277,7 +326,7 @@ function App() {
               <small className="eyebrow">YOUR NEXT CHAPTER</small>
               <h2>Every finish line starts somewhere.</h2>
               <p>Create a running goal and Stride will map out a simple training schedule for you.</p>
-              <button className="btn primary" onClick={() => M('plan')}><Plus size={16}/> Create your first plan</button>
+              <button className="btn primary" onClick={openNewPlan}><Plus size={16}/> Create your first plan</button>
               <small className="subtle">No subscriptions. No account. Just your running journey.</small>
             </div>
           ) : (
@@ -337,12 +386,20 @@ function App() {
           ))}
 
           {tab === 'Plan' && (!plan ? (
-            <Empty title="No plan just yet" text="Set a race date and target time to build your first training schedule." action="Create a plan" click={() => M('plan')}/>
+            <Empty title="No plan just yet" text="Set a race date and target time to build your first training schedule." action="Create a plan" click={openNewPlan}/>
           ) : (
             <>
-              <div className="plansummary">
-                <div><small className="eyebrow">YOUR RACE</small><h2>{plan.name}</h2><p>{plan.distance} · {fmt(plan.raceDate, { day: 'numeric', month: 'long', year: 'numeric' })} · Goal {plan.goalTime}</p></div>
-                <div><small>Target pace</small><b>{pace(plan.goalPace)} <em>/km</em></b></div>
+              <div className="plansummary" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <small className="eyebrow">YOUR RACE</small>
+                  <h2>{plan.name}</h2>
+                  <p>{plan.distance} · {fmt(plan.raceDate, { day: 'numeric', month: 'long', year: 'numeric' })} · Goal {plan.goalTime}</p>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                  <div><small>Target pace</small><b>{pace(plan.goalPace)} <em>/km</em></b></div>
+                  <button className="btn secondary" onClick={openEditPlan} style={{ gap: '6px' }}><Pencil size={15}/> Edit</button>
+                  <button className="btn secondary" onClick={() => deletePlan()} style={{ gap: '6px', color: '#ef4444' }}><Trash size={15}/> Delete</button>
+                </div>
               </div>
               <div className="notice"><Sparkles size={17}/><p>This is a general, rule-based plan based on your goal and estimated weekly distance. Easy runs should feel conversational. Adjust sessions to your recovery and experience.</p></div>
               <div className="sessions">
@@ -457,13 +514,13 @@ function App() {
           <div className="modal">
             <div className="modalhead">
               <div>
-                <h2>{modal === 'plan' ? 'Create a running goal' : editing ? 'Edit your run' : 'Log a run'}</h2>
-                <p>{modal === 'plan' ? 'Tell us what you’re working towards.' : 'A quick note today helps you see the bigger picture.'}</p>
+                <h2>{modal === 'plan' ? 'Create a running goal' : modal === 'editPlan' ? 'Edit running goal' : editing ? 'Edit your run' : 'Log a run'}</h2>
+                <p>{modal === 'plan' ? 'Tell us what you’re working towards.' : modal === 'editPlan' ? 'Update your goals or race details.' : 'A quick note today helps you see the bigger picture.'}</p>
               </div>
               <button className="close" onClick={() => M('')}><X/></button>
             </div>
-            {modal === 'plan' ? (
-              <form onSubmit={newPlan} className="form">
+            {['plan', 'editPlan'].includes(modal) ? (
+              <form onSubmit={savePlan} className="form">
                 <label>Plan / race name<input required placeholder="e.g. Singapore Marathon 2027" value={form.name} onChange={e => F({ ...form, name: e.target.value })}/></label>
                 <div className="formrow">
                   <label>Race distance<select value={form.distance} onChange={e => F({ ...form, distance: e.target.value })}>{Object.keys(KM).map(k => <option key={k}>{k}</option>)}</select></label>
@@ -475,7 +532,10 @@ function App() {
                   <label>Runs per week<select value={form.daysPerWeek} onChange={e => F({ ...form, daysPerWeek: e.target.value })}>{[3, 4, 5, 6].map(n => <option key={n}>{n}</option>)}</select></label>
                 </div>
                 <div className="formhint"><Sparkles size={16}/>This is a suggested starting point, not a substitute for a qualified coach or medical advice.</div>
-                <div className="modalactions"><button type="button" className="btn secondary" onClick={() => M('')}>Cancel</button><button className="btn primary"><Sparkles size={16}/> Build my plan</button></div>
+                <div className="modalactions">
+                  <button type="button" className="btn secondary" onClick={() => M('')}>Cancel</button>
+                  <button className="btn primary"><Sparkles size={16}/> {modal === 'editPlan' ? 'Update Plan' : 'Build my plan'}</button>
+                </div>
               </form>
             ) : (
               <form onSubmit={saveRun} className="form">
