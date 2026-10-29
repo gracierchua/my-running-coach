@@ -102,6 +102,12 @@ function App() {
   let plan = state.plans.find(p => p.id === state.activePlanId) || state.plans[0],
       runs = [...state.runs].sort((a, b) => b.date.localeCompare(a.date)),
       total = state.runs.reduce((s, r) => s + Number(r.distance), 0),
+      
+      // Calculate current month's mileage
+      currentMonthStr = today().slice(0, 7),
+      month = state.runs.filter(r => r.date.startsWith(currentMonthStr)).reduce((s, r) => s + Number(r.distance), 0),
+      
+      // Calculate current week's mileage
       week = state.runs.filter(r => {
         let d = new Date(r.date + 'T12:00:00'),
             n = new Date(),
@@ -110,6 +116,7 @@ function App() {
         start.setHours(0, 0, 0, 0);
         return d >= start && d <= n;
       }).reduce((s, r) => s + Number(r.distance), 0),
+      
       done = plan?.schedule?.filter(s => s.done).length || 0,
       upcoming = plan?.schedule?.filter(s => !s.done && s.date >= today()).slice(0, 4) || [];
 
@@ -355,8 +362,8 @@ function App() {
               </div>
               <div className="stats">
                 <Stat I={Footprints} label="Total distance" value={total.toFixed(1) + ' km'} note="All logged runs"/>
+                <Stat I={CalendarDays} label="This month" value={month.toFixed(1) + ' km'} note="Current month"/>
                 <Stat I={Activity} label="This week" value={week.toFixed(1) + ' km'} note="Since Monday"/>
-                <Stat I={CalendarDays} label="Time to race" value={Math.max(0, Math.ceil((new Date(plan.raceDate + 'T12:00:00') - new Date(today() + 'T12:00:00')) / 86400000)) + ' days'} note={fmt(plan.raceDate)}/>
                 <Stat I={Target} label="Goal pace" value={pace(plan.goalPace)} suffix="/km" note="Target average pace"/>
               </div>
               <div className="twocol">
@@ -417,9 +424,10 @@ function App() {
 
           {tab === 'Run log' && (
             <>
-              <div className="runstats">
+              <div className="runstats" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
                 <div><small>Total runs</small><b>{state.runs.length}</b></div>
-                <div><small>Total distance</small><b>{total.toFixed(1)} <em>km</em></b></div>
+                <div><small>Lifetime distance</small><b>{total.toFixed(1)} <em>km</em></b></div>
+                <div><small>Monthly distance</small><b>{month.toFixed(1)} <em>km</em></b></div>
                 <div><small>Weekly distance</small><b>{week.toFixed(1)} <em>km</em></b></div>
               </div>
               <section className="panel logpanel">
@@ -456,8 +464,9 @@ function App() {
 
           {tab === 'Progress' && (
             <>
-              <div className="stats">
+              <div className="stats" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
                 <Stat I={Footprints} label="Lifetime distance" value={total.toFixed(1) + ' km'} note={state.runs.length + ' runs logged'}/>
+                <Stat I={CalendarDays} label="Monthly distance" value={month.toFixed(1) + ' km'} note="Current month"/>
                 <Stat I={Activity} label="Weekly distance" value={week.toFixed(1) + ' km'} note="Current week"/>
                 <Stat I={Timer} label="Runs logged" value={String(state.runs.length)} note="Every effort counts"/>
                 <Stat I={Trophy} label="Plan sessions" value={String(done)} note={plan ? 'of ' + plan.schedule.length + ' planned' : 'Create a goal plan'}/>
