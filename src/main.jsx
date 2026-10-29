@@ -1091,29 +1091,56 @@ function App() {
               <section className="panel logpanel">
                 <div className="panelhead"><div><small className="eyebrow">YOUR HISTORY</small><h3>All runs</h3></div><small className="pill">{runs.length} logged</small></div>
                 {runs.length ? (
-                  <div className="tablewrap">
-                    <table>
-                      <thead><tr><th>DATE</th><th>ACTIVITY</th><th>DISTANCE</th><th>TIME</th><th>AVG. PACE</th><th>AVG. HR</th><th></th></tr></thead>
-                      <tbody>
-                        {runs.map(r => (
-                          <tr key={r.id}>
-                            <td>{fmt(r.date, { day: 'numeric', month: 'short', year: 'numeric' })}</td>
-                            <td><b>🏃 Run</b>{r.notes && <small className="notes">{r.notes}</small>}</td>
-                            <td>{Number(r.distance).toFixed(2)} km</td>
-                            <td>{r.duration || '—'}</td>
-                            <td>{r.pace ? r.pace + '/km' : '—'}</td>
-                            <td>{r.hr ? r.hr + ' bpm' : '—'}</td>
-                            <td>
-                              <div className="actions">
-                                <button onClick={() => openRun(r)}>Edit</button>
-                                <button onClick={() => { if (confirm('Delete this run?')) S(s => ({ ...s, runs: s.runs.filter(x => x.id !== r.id) })); }}><Trash2 size={14}/></button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <>
+                    {/* DESKTOP TABLE VIEW */}
+                    <div className="tablewrap desktop-run-table">
+                      <table>
+                        <thead><tr><th>DATE</th><th>ACTIVITY</th><th>DISTANCE</th><th>TIME</th><th>AVG. PACE</th><th>AVG. HR</th><th></th></tr></thead>
+                        <tbody>
+                          {runs.map(r => (
+                            <tr key={r.id}>
+                              <td>{fmt(r.date, { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                              <td><b>🏃 Run</b>{r.notes && <small className="notes">{r.notes}</small>}</td>
+                              <td>{Number(r.distance).toFixed(2)} km</td>
+                              <td>{r.duration || '—'}</td>
+                              <td>{r.pace ? r.pace + '/km' : '—'}</td>
+                              <td>{r.hr ? r.hr + ' bpm' : '—'}</td>
+                              <td>
+                                <div className="actions">
+                                  <button onClick={() => openRun(r)}>Edit</button>
+                                  <button onClick={() => { if (confirm('Delete this run?')) S(s => ({ ...s, runs: s.runs.filter(x => x.id !== r.id) })); }}><Trash2 size={14}/></button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* MOBILE CARD VIEW */}
+                    <div className="mobile-run-cards" style={{ display: 'none', flexDirection: 'column', gap: '12px' }}>
+                      {runs.map(r => (
+                        <div key={r.id} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: '0.8rem', color: '#71717a', fontWeight: 600 }}>{fmt(r.date, { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                            <b style={{ color: '#ccff00', fontSize: '1.1rem' }}>{Number(r.distance).toFixed(2)} km</b>
+                          </div>
+                          <div>
+                            <b style={{ fontSize: '0.95rem' }}>🏃 Run {r.notes ? `(${r.notes})` : ''}</b>
+                          </div>
+                          <div style={{ display: 'flex', gap: '16px', fontSize: '0.82rem', color: '#a1a1aa', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '8px' }}>
+                            <span>Time: <strong style={{ color: '#f4f4f5' }}>{r.duration || '—'}</strong></span>
+                            <span>Pace: <strong style={{ color: '#f4f4f5' }}>{r.pace ? r.pace + '/km' : '—'}</strong></span>
+                            <span>HR: <strong style={{ color: '#f4f4f5' }}>{r.hr ? r.hr + ' bpm' : '—'}</strong></span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '4px' }}>
+                            <button className="btn secondary" style={{ padding: '4px 12px', fontSize: '0.78rem' }} onClick={() => openRun(r)}>Edit</button>
+                            <button className="btn secondary" style={{ padding: '4px 12px', fontSize: '0.78rem', color: '#ef4444' }} onClick={() => { if (confirm('Delete this run?')) S(s => ({ ...s, runs: s.runs.filter(x => x.id !== r.id) })); }}>Delete</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
                 ) : (
                   <Empty title="Your log starts with one run" text="Add a run manually or scan a screenshot from Strava or another running app." action="Log your first run" click={() => openRun()}/>
                 )}
