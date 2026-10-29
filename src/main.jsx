@@ -4,7 +4,7 @@ import {
   Activity, CalendarDays, Check, ChevronDown, ChevronUp, Footprints, 
   LayoutDashboard, Plus, Target, Timer, Trophy, TrendingUp, 
   Settings2, ArrowDownToLine, ArrowUpFromLine, ImagePlus, 
-  Trash2, X, Sparkles, ListChecks, HeartPulse, Pencil, Trash, Zap, CheckCircle2, Flag
+  Trash2, X, Sparkles, ListChecks, HeartPulse, Pencil, Trash, Zap, CheckCircle2, Flag, FileText, Calendar
 } from 'lucide-react';
 import './styles.css';
 
@@ -91,7 +91,7 @@ const KEY = 'stride-running-coach-v1',
         return '3-5 miles comfortable pace • Conversational effort throughout';
       },
       
-      fresh = () => ({ plans: [], runs: [], activePlanId: null, sessionDateOverrides: {} });
+      fresh = () => ({ plans: [], runs: [], activePlanId: null, sessionDateOverrides: {}, lastSyncedPlanHash: '' });
 
 function load() {
   try {
@@ -101,13 +101,11 @@ function load() {
   }
 }
 
-// MULTI-RUN AGGREGATED AI RACE PREDICTOR WITH HEART RATE EFFICIENCY
 function predictRaceTimes(runs) {
   if (!runs || runs.length === 0) return null;
   let validRuns = runs.filter(r => Number(r.distance) >= 3 && parseTime(r.duration) > 0);
   if (validRuns.length === 0) return null;
 
-  // Aggregate performance across ALL valid logged runs
   let totalDist = 0;
   let weightedPaceSecSum = 0;
   let hrSum = 0;
@@ -122,7 +120,7 @@ function predictRaceTimes(runs) {
 
     let hr = parseInt(r.hr || r.heartRate);
     if (!Number.isNaN(hr) && hr > 0) {
-      hrSum += hr * d; // weighted by distance
+      hrSum += hr * d;
       hrCount += d;
     }
   });
@@ -130,11 +128,10 @@ function predictRaceTimes(runs) {
   let baselinePaceSec = weightedPaceSecSum / totalDist;
   let avgHr = hrCount > 0 ? Math.round(hrSum / hrCount) : null;
 
-  // HR Efficiency Factor adjustment (lower HR at same pace indicates better fitness)
   let hrMultiplier = 1.0;
   if (avgHr) {
-    if (avgHr < 140) hrMultiplier = 0.97; // High efficiency
-    else if (avgHr > 165) hrMultiplier = 1.04; // High cardiac strain
+    if (avgHr < 140) hrMultiplier = 0.97;
+    else if (avgHr > 165) hrMultiplier = 1.04;
   }
 
   let adjustedPaceSec = baselinePaceSec * hrMultiplier;
@@ -142,7 +139,6 @@ function predictRaceTimes(runs) {
   let results = {};
 
   for (let [label, d2] of Object.entries(targets)) {
-    // Riegel formula with multi-run baseline & HR calibration
     let predictedSecs = (adjustedPaceSec * d2) * Math.pow(d2 / Math.max(5, totalDist / validRuns.length), 0.05);
     results[label] = {
       time: formatDuration(predictedSecs),
@@ -411,6 +407,17 @@ function App() {
       upcoming = plan?.schedule?.filter(s => !s.done && s.date >= today()).slice(0, 4) || [],
       predictions = useMemo(() => predictRaceTimes(state.runs), [state.runs]);
 
+  // PLAN HASH FOR VERSION CHECK / UPDATE PROMPT
+  const currentPlanHash = useMemo(() => {
+    if (!plan) return '';
+    return JSON.stringify({ name: plan.name, raceDate: plan.raceDate, goalTime: plan.goalTime, schedLen: plan.schedule.length, overrides: state.sessionDateOverrides });
+  }, [plan, state.sessionDateOverrides]);
+
+  const isPlanOutdated = useMemo(() => {
+    if (!state.lastSyncedPlanHash || !currentPlanHash) return false;
+    return state.lastSyncedPlanHash !== currentPlanHash;
+  }, [state.lastSyncedPlanHash, currentPlanHash]);
+
   const weeksGrouped = useMemo(() => {
     if (!plan?.schedule) return {};
     return plan.schedule.reduce((acc, item) => {
@@ -435,6 +442,52 @@ function App() {
       }
     }));
     N('Workout rescheduled.');
+  }
+
+  // EXPORT PLAN AS PDF
+  function exportPDF() {
+    if (!plan) return;
+    window.print();
+    N('PDF print dialog opened.');
+  }
+
+  // EXPORT / SYNC PLAN TO CALENDAR (.ICS FILE)
+  function syncCalendar() {
+    if (!plan || !plan.schedule) return;
+    let icsLines = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Stride Running Coach//EN',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH'
+    ];
+
+    plan.schedule.forEach(s => {
+      let dClean = s.date.replace(/-/g, '');
+      icsLines.push(
+        'BEGIN:VEVENT',
+        `UID:stride-${s.id}@stride.app`,
+        `DTSTAMP:${dClean}T070000Z`,
+        `DTSTART;VALUE=DATE:${dClean}`,
+        `DTEND;VALUE=DATE:${dClean}`,
+        `SUMMARY:[Stride] ${s.type} (${s.km} km)`,
+        `DESCRIPTION:Target Pace: ${s.pace}/km. ${getWorkoutDescription(s.type, s.pace, s.done)}`,
+        'END:VEVENT'
+      );
+    });
+
+    icsLines.push('END:VCALENDAR');
+    let blob = new Blob([icsLines.join('\r\n')], { type: 'text/calendar;charset=utf-8' });
+    let url = URL.createObjectURL(blob);
+    let a = document.createElement('a');
+    a.href = url;
+    a.download = `${(plan.name || 'training-plan').toLowerCase().replace(/\s+/g, '-')}-schedule.ics`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    // Update synced hash
+    S(s => ({ ...s, lastSyncedPlanHash: currentPlanHash }));
+    N('Calendar schedule exported! Import the .ics file into Google Calendar.');
   }
 
   function openNewPlan() {
@@ -531,7 +584,8 @@ function App() {
         return {
           ...s,
           plans: remaining,
-          activePlanId: remaining.length ? remaining[0].id : null
+          activePlanId: remaining.length ? remaining[0].id : null,
+          lastSyncedPlanHash: ''
         };
       });
       N('Plan deleted.');
@@ -702,6 +756,23 @@ function App() {
           </div>
         </header>
         <div className="page">
+          
+          {/* PLAN UPDATE PROMPT BANNER */}
+          {isPlanOutdated && (
+            <div style={{ background: 'rgba(204, 255, 0, 0.15)', border: '1px solid #ccff00', borderRadius: '12px', padding: '14px 20px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <Sparkles size={20} style={{ color: '#ccff00' }}/>
+                <div>
+                  <b style={{ color: '#f4f4f5', display: 'block' }}>Your training plan has been updated!</b>
+                  <small style={{ color: '#a1a1aa' }}>Sync your latest schedule updates to your calendar.</small>
+                </div>
+              </div>
+              <button className="btn primary" onClick={syncCalendar} style={{ padding: '8px 16px', fontSize: '0.85rem' }}>
+                <Calendar size={15}/> Sync Updates to Calendar
+              </button>
+            </div>
+          )}
+
           <div className="heading">
             <div>
               <small className="eyebrow">{tab === 'Overview' ? 'YOUR RUNNING SPACE' : tab === 'Plan' ? 'ONE SESSION AT A TIME' : tab === 'Run log' ? 'EVERY RUN COUNTS' : tab === 'Progress' ? 'ZOOM OUT, SEE THE WORK' : 'YOUR DATA, YOUR CALL'}</small>
@@ -750,7 +821,7 @@ function App() {
                 </div>
               </div>
 
-              {/* AI RACE PREDICTOR CARD (AGREGATED ACROSS ALL LOGGED RUNS & HR) */}
+              {/* AI RACE PREDICTOR CARD */}
               <section className="panel" style={{ marginBottom: '24px' }}>
                 <div className="panelhead">
                   <div>
@@ -818,9 +889,11 @@ function App() {
                   <h2>{plan.name}</h2>
                   <p>{plan.distance} · {fmt(plan.raceDate, { day: 'numeric', month: 'long', year: 'numeric' })} · Goal {plan.goalTime}</p>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                   <div><small>Target pace</small><b>{pace(plan.goalPace)} <em>/km</em></b></div>
-                  <button className="btn secondary" onClick={openEditPlan} style={{ gap: '6px' }}><Pencil size={15}/> Edit / Add Races</button>
+                  <button className="btn secondary" onClick={exportPDF} style={{ gap: '6px' }}><FileText size={15}/> Export PDF</button>
+                  <button className="btn secondary" onClick={syncCalendar} style={{ gap: '6px', borderColor: isPlanOutdated ? '#ccff00' : undefined }}><Calendar size={15}/> {state.lastSyncedPlanHash ? 'Sync Calendar' : 'Sync to Calendar'}</button>
+                  <button className="btn secondary" onClick={openEditPlan} style={{ gap: '6px' }}><Pencil size={15}/> Edit</button>
                   <button className="btn secondary" onClick={() => deletePlan()} style={{ gap: '6px', color: '#ef4444' }}><Trash size={15}/> Delete</button>
                 </div>
               </div>
