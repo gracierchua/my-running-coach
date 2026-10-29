@@ -108,7 +108,6 @@ function predictRaceTimes(runs) {
   return { results, baseline: bestRun };
 }
 
-// GENERATOR: INCLUDES CUSTOM RUNNING DAYS & GUARANTEED INTERMEDIATE RACES
 function makePlan(p, userRuns = []) {
   let km = KM[p.distance] || 42.195,
       race = new Date(p.raceDate + 'T12:00:00'),
@@ -120,8 +119,6 @@ function makePlan(p, userRuns = []) {
   monday.setDate(monday.getDate() + diffToMonday);
 
   let weeks = Math.max(4, Math.min(24, Math.ceil((race - monday) / 604800000))),
-      
-      // Selected custom run days (e.g. [1, 3, 6] for Tue, Thu, Sun)
       selectedSlots = Array.isArray(p.runDays) && p.runDays.length > 0 
         ? [...p.runDays].sort((a, b) => a - b)
         : [1, 3, 5, 6],
@@ -241,7 +238,6 @@ function makePlan(p, userRuns = []) {
     });
   }
 
-  // FORCE INJECT ANY UNMATCHED INTERMEDIATE RACES SO THEY ARE NEVER REMOVED
   interRaces.forEach(r => {
     if (r.date && r.date >= today() && r.date < p.raceDate && !insertedDates.has(r.date)) {
       let rDate = new Date(r.date + 'T12:00:00');
@@ -759,17 +755,20 @@ function App() {
                                   display: 'flex',
                                   alignItems: 'center',
                                   justify: 'space-between',
-                                  background: s.done ? 'rgba(204,255,0,0.05)' : 'rgba(255,255,255,0.02)',
+                                  background: s.done ? 'rgba(255,255,255,0.01)' : 'rgba(255,255,255,0.03)',
                                   padding: '12px 16px',
                                   borderRadius: '10px',
-                                  border: s.done ? '1px solid rgba(204,255,0,0.3)' : '1px solid rgba(255,255,255,0.05)'
+                                  border: s.done ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(255,255,255,0.1)',
+                                  opacity: s.done ? 0.45 : 1,
+                                  filter: s.done ? 'grayscale(0.3)' : 'none',
+                                  transition: 'all 0.2s ease'
                                 }}
                               >
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '16px', minWidth: '120px' }}>
-                                  <span style={{ color: '#a1a1aa', fontWeight: 600, fontSize: '0.85rem', width: '36px' }}>
+                                  <span style={{ color: s.done ? '#71717a' : '#a1a1aa', fontWeight: 600, fontSize: '0.85rem', width: '36px' }}>
                                     {fmt(s.date, { weekday: 'short' })}
                                   </span>
-                                  <span style={{ fontWeight: 700, fontSize: '0.95rem', color: '#f4f4f5' }}>
+                                  <span style={{ fontWeight: 700, fontSize: '0.95rem', color: s.done ? '#a1a1aa' : '#f4f4f5', textDecoration: s.done ? 'line-through' : 'none' }}>
                                     {fmt(s.date, { day: 'numeric', month: 'short' })}
                                   </span>
                                 </div>
@@ -796,11 +795,24 @@ function App() {
                                   <b style={{ fontSize: '1rem', color: badgeStyle.color }}>{s.km} km</b>
                                 </div>
 
+                                {/* CHECKBOX WITH CHECK TICK */}
                                 <button 
-                                  className={'check ' + (s.done ? 'checked' : '')} 
                                   onClick={() => toggle(s.id)}
+                                  style={{
+                                    width: '26px',
+                                    height: '26px',
+                                    borderRadius: '6px',
+                                    border: s.done ? '2px solid #ccff00' : '2px solid rgba(255,255,255,0.2)',
+                                    background: s.done ? '#ccff00' : 'transparent',
+                                    color: s.done ? '#090a09' : 'transparent',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease'
+                                  }}
                                 >
-                                  {s.done ? <Check size={15}/> : ''}
+                                  {s.done ? <Check size={16} strokeWidth={3}/> : null}
                                 </button>
                               </div>
                             );
@@ -934,7 +946,6 @@ function App() {
                   <label>Current weekly distance (km)<input type="number" min="0" max="200" required value={form.weeklyKm} onChange={e => F({ ...form, weeklyKm: e.target.value })}/></label>
                 </div>
 
-                {/* SELECT SPECIFIC RUNNING DAYS */}
                 <div style={{ marginTop: '12px' }}>
                   <label style={{ fontWeight: 600, fontSize: '0.88rem', color: '#f4f4f5', display: 'block', marginBottom: '8px' }}>
                     Select your preferred running days:
@@ -968,7 +979,6 @@ function App() {
                   </small>
                 </div>
 
-                {/* INTERMEDIATE TUNE-UP RACES */}
                 <div style={{ marginTop: '16px', padding: '16px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
                   <label style={{ fontWeight: 700, color: '#ccff00', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <Flag size={16}/> Intermediate Tune-Up Races (Optional)
