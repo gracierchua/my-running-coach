@@ -49,11 +49,9 @@ function load() {
   }
 }
 
-// Riegel Race Predictor Formula: T2 = T1 * (D2 / D1)^1.06
+// Riegel Race Predictor Formula
 function predictRaceTimes(runs) {
   if (!runs || runs.length === 0) return null;
-
-  // Find best recent performance (best pace with min distance of 3km)
   let validRuns = runs.filter(r => Number(r.distance) >= 3 && parseTime(r.duration) > 0);
   if (validRuns.length === 0) return null;
 
@@ -68,14 +66,9 @@ function predictRaceTimes(runs) {
   let d1 = Number(bestRun.distance);
   let t1 = parseTime(bestRun.duration);
 
-  const targets = {
-    '5K': 5.0,
-    '10K': 10.0,
-    '21.1K': 21.0975,
-    '42.2K': 42.195
-  };
-
+  const targets = { '5K': 5.0, '10K': 10.0, '21.1K': 21.0975, '42.2K': 42.195 };
   let results = {};
+
   for (let [label, d2] of Object.entries(targets)) {
     let predictedSecs = t1 * Math.pow(d2 / d1, 1.06);
     results[label] = {
@@ -87,6 +80,7 @@ function predictRaceTimes(runs) {
   return { results, baseline: bestRun };
 }
 
+// REALISTIC MARATHON / HALF MARATHON GENERATOR
 function makePlan(p) {
   let km = KM[p.distance],
       race = new Date(p.raceDate + 'T12:00:00'),
@@ -97,11 +91,40 @@ function makePlan(p) {
       gp = parseTime(p.goalTime) / km,
       schedule = [];
 
+  // Determine Peak Long Run target based on race distance
+  let peakLong = km >= 40 ? 34.0 : km >= 20 ? 20.0 : km >= 9 ? 13.0 : 6.0;
+  let startWeeklyKm = Math.max(15, Number(p.weeklyKm) || 25);
+  let startLong = Math.min(peakLong * 0.45, Math.max(8.0, startWeeklyKm * 0.35));
+
+  let buildWeeks = Math.max(1, weeks - 3); // Reserve last 3 weeks for taper
+
   for (let w = 0; w < weeks; w++) {
-    let left = weeks - w,
-        deload = (w + 1) % 4 === 0,
-        weekKm = Math.max(8, Number(p.weeklyKm) || 15) * Math.min(1.55, 1 + w * .08) * (deload ? .78 : 1) * (left === 1 ? .55 : left === 2 ? .75 : 1),
-        long = Math.max(km >= 40 ? 10 : km >= 20 ? 7 : 4, Math.min(km * .75, weekKm * (km >= 20 ? .32 : .27)));
+    let left = weeks - w;
+    let deload = (w + 1) % 4 === 0;
+    let long = startLong;
+    let weekKm = startWeeklyKm;
+
+    if (left === 1) {
+      // Race week shakeout
+      long = km >= 40 ? 8.0 : 5.0;
+      weekKm = startWeeklyKm * 0.45;
+    } else if (left === 2) {
+      // Final taper week
+      long = km >= 40 ? 18.0 : 10.0;
+      weekKm = startWeeklyKm * 0.65;
+    } else if (left === 3) {
+      // First taper week
+      long = km >= 40 ? 26.0 : 14.0;
+      weekKm = startWeeklyKm * 0.80;
+    } else {
+      // Progressive build-up
+      let progress = w / Math.max(1, buildWeeks - 1);
+      long = startLong + (peakLong - startLong) * Math.min(1.0, progress);
+      if (deload) long *= 0.78;
+      weekKm = Math.max(startWeeklyKm, long / 0.35);
+    }
+
+    long = Math.round(long * 2) / 2;
 
     slots.forEach((day, i) => {
       let date = new Date(now);
@@ -109,17 +132,18 @@ function makePlan(p) {
       let ds = date.toISOString().slice(0, 10);
       
       if (ds >= today() && ds < p.raceDate) {
-        let d = i === slots.length - 1 ? long : (weekKm - long) / (slots.length - 1);
-        let type = i === slots.length - 1 ? 'Long easy run' : i === 1 ? 'Steady / tempo' : 'Easy run';
+        let isLongRun = i === slots.length - 1;
+        let d = isLongRun ? long : Math.max(3.0, Math.round(((weekKm - long) / (slots.length - 1)) * 2) / 2);
+        let type = isLongRun ? 'Long easy run' : i === 1 ? 'Steady / tempo' : 'Easy run';
         if (left === 1) type = 'Easy shakeout';
         
         schedule.push({
           id: uid(),
           date: ds,
           week: w + 1,
-          km: Math.max(2, Math.round(d * 2) / 2),
+          km: d,
           type,
-          pace: pace(gp * (type.includes('tempo') ? .96 : 1.12)),
+          pace: pace(gp * (type.includes('tempo') ? 0.96 : 1.12)),
           done: false
         });
       }
@@ -137,7 +161,7 @@ function App() {
         [editing, E] = useState(null),
         [notice, N] = useState(''),
         [busy, B] = useState(false),
-        [form, F] = useState({ name: '', distance: 'Marathon', goalTime: '4:30:00', raceDate: '', weeklyKm: '20', daysPerWeek: '4' }),
+        [form, F] = useState({ name: '', distance: 'Marathon', goalTime: '4:30:00', raceDate: '', weeklyKm: '30', daysPerWeek: '4' }),
         [run, R] = useState({ date: today(), distance: '', duration: '', pace: '', notes: '' });
 
   useEffect(() => { localStorage.setItem(KEY, JSON.stringify(state)); }, [state]);
@@ -166,12 +190,10 @@ function App() {
       
       done = plan?.schedule?.filter(s => s.done).length || 0,
       upcoming = plan?.schedule?.filter(s => !s.done && s.date >= today()).slice(0, 4) || [],
-      
-      // Compute AI race predictions
       predictions = useMemo(() => predictRaceTimes(state.runs), [state.runs]);
 
   function openNewPlan() {
-    F({ name: '', distance: 'Marathon', goalTime: '4:30:00', raceDate: '', weeklyKm: '20', daysPerWeek: '4' });
+    F({ name: '', distance: 'Marathon', goalTime: '4:30:00', raceDate: '', weeklyKm: '30', daysPerWeek: '4' });
     M('plan');
   }
 
@@ -182,7 +204,7 @@ function App() {
       distance: plan.distance || 'Marathon',
       goalTime: plan.goalTime || '4:30:00',
       raceDate: plan.raceDate || '',
-      weeklyKm: String(plan.weeklyKm || '20'),
+      weeklyKm: String(plan.weeklyKm || '30'),
       daysPerWeek: String(plan.daysPerWeek || '4')
     });
     M('editPlan');
