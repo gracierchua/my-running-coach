@@ -49,6 +49,24 @@ const KEY = 'stride-running-coach-v1',
         }
         return `${m}:${String(s).padStart(2, '0')}`;
       },
+
+      getWorkoutBadgeStyle = type => {
+        let lower = String(type || '').toLowerCase();
+        if (lower.includes('race') || lower.includes('tune-up')) {
+          return { bg: 'rgba(204, 255, 0, 0.15)', border: '#ccff00', color: '#ccff00' };
+        }
+        if (lower.includes('recovery')) {
+          return { bg: 'rgba(16, 185, 129, 0.2)', border: '#10b981', color: '#34d399' };
+        }
+        if (lower.includes('steady') || lower.includes('tempo')) {
+          return { bg: 'rgba(217, 119, 6, 0.2)', border: '#f59e0b', color: '#fbbf24' };
+        }
+        if (lower.includes('interval') || lower.includes('speed')) {
+          return { bg: 'rgba(239, 68, 68, 0.2)', border: '#ef4444', color: '#f87171' };
+        }
+        // Default Easy Run / Long Run
+        return { bg: 'rgba(56, 189, 248, 0.15)', border: '#38bdf8', color: '#38bdf8' };
+      },
       
       fresh = () => ({ plans: [], runs: [], activePlanId: null, sessionDateOverrides: {}, lastSyncedPlanHash: '' });
 
@@ -184,22 +202,22 @@ function makePlan(p, userRuns = [], dateOverrides = {}) {
         } else {
           let isLongRun = i === selectedSlots.length - 1;
           let d = long;
-          let type = 'Long Run';
+          let type = 'Long run';
           let sessionPace = pace(calibratedGP * 1.18);
 
           if (!isLongRun) {
             if (i === 0) {
-              d = 5.0;
-              type = 'Easy run';
-              sessionPace = pace(calibratedGP * 1.20);
+              d = 4.5;
+              type = 'Recovery run';
+              sessionPace = pace(calibratedGP * 1.25);
             } else if (i === 1) {
-              d = 6.5;
+              d = 6.0;
               type = 'Steady / tempo';
               sessionPace = pace(calibratedGP * 1.05);
             } else {
-              d = 4.8;
-              type = 'Recovery / easy';
-              sessionPace = pace(calibratedGP * 1.25);
+              d = 9.0;
+              type = 'Easy run';
+              sessionPace = pace(calibratedGP * 1.20);
             }
           }
 
@@ -893,7 +911,7 @@ function App() {
                       {isExpanded && (
                         <div style={{ marginTop: '20px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                           {sessions.map(s => {
-                            let isTuneUp = s.intermediate || String(s.type).includes('TUNE-UP');
+                            let badgeStyle = getWorkoutBadgeStyle(s.type);
 
                             return (
                               <div 
@@ -905,7 +923,7 @@ function App() {
                                   background: 'rgba(255,255,255,0.03)',
                                   padding: '14px 18px',
                                   borderRadius: '10px',
-                                  border: isTuneUp ? '1px solid #ccff00' : '1px solid rgba(255,255,255,0.08)',
+                                  border: `1px solid ${badgeStyle.border}`,
                                   opacity: s.done ? 0.5 : 1,
                                   transition: 'all 0.15s ease',
                                   flexWrap: 'wrap',
@@ -922,38 +940,24 @@ function App() {
                                 </div>
 
                                 <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '12px', minWidth: '240px', flexWrap: 'wrap' }}>
-                                  {isTuneUp ? (
-                                    <span style={{
-                                      background: 'rgba(204, 255, 0, 0.15)',
-                                      border: '1px solid #ccff00',
-                                      color: '#ccff00',
-                                      padding: '4px 12px',
-                                      borderRadius: '8px',
-                                      fontWeight: 700,
-                                      fontSize: '0.82rem'
-                                    }}>
-                                      {s.type}
-                                    </span>
-                                  ) : (
-                                    <span style={{
-                                      background: 'rgba(56, 189, 248, 0.15)',
-                                      border: '1px solid #38bdf8',
-                                      color: '#38bdf8',
-                                      padding: '4px 12px',
-                                      borderRadius: '8px',
-                                      fontWeight: 700,
-                                      fontSize: '0.82rem'
-                                    }}>
-                                      {s.type}
-                                    </span>
-                                  )}
+                                  <span style={{
+                                    background: badgeStyle.bg,
+                                    border: `1px solid ${badgeStyle.border}`,
+                                    color: badgeStyle.color,
+                                    padding: '4px 12px',
+                                    borderRadius: '8px',
+                                    fontWeight: 700,
+                                    fontSize: '0.82rem'
+                                  }}>
+                                    {s.type}
+                                  </span>
                                   <small style={{ color: '#71717a', fontSize: '0.8rem' }}>
                                     Target Pace: {s.pace}/km
                                   </small>
                                 </div>
 
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-                                  <b style={{ fontSize: '1.05rem', color: isTuneUp ? '#ccff00' : '#f4f4f5' }}>{s.km} km</b>
+                                  <b style={{ fontSize: '1.05rem', color: badgeStyle.color }}>{s.km} km</b>
                                   <button 
                                     onClick={() => toggle(s.id)}
                                     style={{
