@@ -96,14 +96,22 @@ function predictRaceTimes(runs) {
   return { results, baseline: bestRun };
 }
 
-// PLAN GENERATOR WITH TUNE-UP INTERMEDIATE RACES
+// FIXED PLAN GENERATOR WITH STRICT CHRONOLOGICAL DATES
 function makePlan(p) {
   let km = KM[p.distance],
       race = new Date(p.raceDate + 'T12:00:00'),
       now = new Date(today() + 'T12:00:00'),
-      weeks = Math.max(4, Math.min(24, Math.ceil((race - now) / 604800000))),
+      
+      // Calculate Monday of current week
+      monday = new Date(now),
+      dayOfWeek = monday.getDay(),
+      diffToMonday = (dayOfWeek === 0 ? -6 : 1 - dayOfWeek);
+  monday.setDate(monday.getDate() + diffToMonday);
+
+  let weeks = Math.max(4, Math.min(24, Math.ceil((race - monday) / 604800000))),
       days = Number(p.daysPerWeek),
-      slots = days === 3 ? [2, 4, 0] : days === 4 ? [2, 4, 6, 0] : days === 5 ? [1, 3, 5, 6, 0] : [1, 2, 4, 5, 0, 6],
+      // Mon=0, Tue=1, Wed=2, Thu=3, Fri=4, Sat=5, Sun=6
+      slots = days === 3 ? [1, 3, 6] : days === 4 ? [1, 3, 5, 6] : days === 5 ? [1, 2, 4, 5, 6] : [0, 1, 3, 4, 5, 6],
       gp = parseTime(p.goalTime) / km,
       schedule = [];
 
@@ -112,7 +120,6 @@ function makePlan(p) {
   let startLong = Math.min(peakLong * 0.45, Math.max(8.0, startWeeklyKm * 0.35));
   let buildWeeks = Math.max(1, weeks - 3);
 
-  // Map intermediate races
   let interRaces = Array.isArray(p.intermediateRaces) ? p.intermediateRaces : [];
 
   for (let w = 0; w < weeks; w++) {
@@ -140,13 +147,12 @@ function makePlan(p) {
     long = Math.round(long * 2) / 2;
     let midweekTotal = Math.max(10.0, weekKm - long);
 
-    slots.forEach((day, i) => {
-      let date = new Date(now);
-      date.setDate(now.getDate() + w * 7 + ((day - now.getDay() + 7) % 7));
+    slots.forEach((dayOffset, i) => {
+      let date = new Date(monday);
+      date.setDate(monday.getDate() + w * 7 + dayOffset);
       let ds = date.toISOString().slice(0, 10);
       
       if (ds >= today() && ds < p.raceDate) {
-        // Check if an intermediate race matches this date
         let matchInterRace = interRaces.find(r => r.date === ds);
 
         if (matchInterRace) {
@@ -198,6 +204,10 @@ function makePlan(p) {
   }
 
   schedule.push({ id: uid(), date: p.raceDate, week: weeks, km, type: 'GOAL RACE DAY', pace: pace(gp), done: false, race: true });
+
+  // STRICT CHRONOLOGICAL SORT BY DATE
+  schedule.sort((a, b) => a.date.localeCompare(b.date));
+
   return { ...p, schedule, weeks, goalPace: gp };
 }
 
@@ -210,7 +220,6 @@ function App() {
         [busy, B] = useState(false),
         [expandedWeeks, setExpandedWeeks] = useState({ 1: true }),
         
-        // Form states including intermediate tune-up races
         [form, F] = useState({ 
           name: '', 
           distance: 'Marathon', 
@@ -610,7 +619,7 @@ function App() {
                 </div>
               </div>
 
-              {/* WEEKLY CARD CONTAINER WITH MULTI-COLOR ACCENTS */}
+              {/* WEEKLY CARD CONTAINER */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 {Object.entries(weeksGrouped).map(([weekNum, sessions]) => {
                   let isExpanded = expandedWeeks[weekNum] ?? (Number(weekNum) === 1);
@@ -834,7 +843,7 @@ function App() {
         <footer><span>STRIDE © {new Date().getFullYear()}</span><span>Made for the miles ahead <b>✳</b></span></footer>
       </main>
 
-      {/* PLAN FORM MODAL WITH INTERMEDIATE RACES */}
+      {/* PLAN FORM MODAL */}
       {modal && (
         <div className="backdrop" onMouseDown={e => e.target === e.currentTarget && M('')}>
           <div className="modal">
@@ -858,7 +867,6 @@ function App() {
                   <label>Runs per week<select value={form.daysPerWeek} onChange={e => F({ ...form, daysPerWeek: e.target.value })}>{[3, 4, 5, 6].map(n => <option key={n}>{n}</option>)}</select></label>
                 </div>
 
-                {/* INTERMEDIATE / TUNE-UP RACES BUILDER */}
                 <div style={{ marginTop: '16px', padding: '16px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
                   <label style={{ fontWeight: 700, color: '#ccff00', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <Flag size={16}/> Intermediate Tune-Up Races (Optional)
