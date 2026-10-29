@@ -44,10 +44,13 @@ const KEY = 'stride-running-coach-v1',
         if (lower.includes('race')) {
           return { bg: 'rgba(204, 255, 0, 0.2)', border: '#ccff00', color: '#ccff00' };
         }
+        if (lower.includes('interval') || lower.includes('speed')) {
+          return { bg: 'rgba(239, 68, 68, 0.25)', border: '#ef4444', color: '#f87171' };
+        }
         if (lower.includes('long')) {
           return { bg: 'rgba(147, 51, 234, 0.25)', border: '#a855f7', color: '#c084fc' };
         }
-        if (lower.includes('tempo') || lower.includes('steady') || lower.includes('interval')) {
+        if (lower.includes('tempo') || lower.includes('steady')) {
           return { bg: 'rgba(217, 119, 6, 0.25)', border: '#f59e0b', color: '#fbbf24' };
         }
         if (lower.includes('recovery')) {
@@ -96,13 +99,12 @@ function predictRaceTimes(runs) {
   return { results, baseline: bestRun };
 }
 
-// FIXED PLAN GENERATOR WITH STRICT CHRONOLOGICAL DATES
-function makePlan(p) {
-  let km = KM[p.distance],
+// GENERATOR: PACES CALCULATED DYNAMICALLY FROM GOAL PACE & USER RUN LOG DATA
+function makePlan(p, userRuns = []) {
+  let km = KM[p.distance] || 42.195,
       race = new Date(p.raceDate + 'T12:00:00'),
       now = new Date(today() + 'T12:00:00'),
       
-      // Calculate Monday of current week
       monday = new Date(now),
       dayOfWeek = monday.getDay(),
       diffToMonday = (dayOfWeek === 0 ? -6 : 1 - dayOfWeek);
@@ -110,13 +112,23 @@ function makePlan(p) {
 
   let weeks = Math.max(4, Math.min(24, Math.ceil((race - monday) / 604800000))),
       days = Number(p.daysPerWeek),
-      // Mon=0, Tue=1, Wed=2, Thu=3, Fri=4, Sat=5, Sun=6
       slots = days === 3 ? [1, 3, 6] : days === 4 ? [1, 3, 5, 6] : days === 5 ? [1, 2, 4, 5, 6] : [0, 1, 3, 4, 5, 6],
+      
+      // Calculate Goal Pace (GP) from goal finish time
       gp = parseTime(p.goalTime) / km,
       schedule = [];
 
-  let peakLong = km >= 40 ? 34.0 : km >= 20 ? 20.0 : km >= 9 ? 13.0 : 6.0;
-  let startWeeklyKm = Math.max(15, Number(p.weeklyKm) || 25);
+  // Calibrate pace relative to user's best recent run if logged
+  let validLogged = userRuns.filter(r => Number(r.distance) >= 3 && parseTime(r.duration) > 0);
+  let calibratedGP = gp;
+  if (validLogged.length > 0) {
+    let recentPaceSec = validLogged.reduce((sum, r) => sum + (parseTime(r.duration) / Number(r.distance)), 0) / validLogged.length;
+    // Blend target pace and actual performance 70/30 for realistic training targets
+    calibratedGP = (gp * 0.70) + (recentPaceSec * 0.30);
+  }
+
+  let peakLong = km >= 40 ? 32.0 : km >= 20 ? 20.0 : km >= 9 ? 13.0 : 6.0;
+  let startWeeklyKm = Math.max(20, Number(p.weeklyKm) || 30);
   let startLong = Math.min(peakLong * 0.45, Math.max(8.0, startWeeklyKm * 0.35));
   let buildWeeks = Math.max(1, weeks - 3);
 
@@ -135,8 +147,8 @@ function makePlan(p) {
       long = km >= 40 ? 18.0 : 10.0;
       weekKm = startWeeklyKm * 0.65;
     } else if (left === 3) {
-      long = km >= 40 ? 26.0 : 14.0;
-      weekKm = startWeeklyKm * 0.80;
+      long = km >= 40 ? 28.0 : 14.0;
+      weekKm = startWeeklyKm * 0.95;
     } else {
       let progress = w / Math.max(1, buildWeeks - 1);
       long = startLong + (peakLong - startLong) * Math.min(1.0, progress);
@@ -145,7 +157,7 @@ function makePlan(p) {
     }
 
     long = Math.round(long * 2) / 2;
-    let midweekTotal = Math.max(10.0, weekKm - long);
+    let midweekTotal = Math.max(12.0, weekKm - long);
 
     slots.forEach((dayOffset, i) => {
       let date = new Date(monday);
@@ -163,7 +175,7 @@ function makePlan(p) {
             week: w + 1,
             km: raceKm,
             type: `🏆 TUNE-UP RACE (${matchInterRace.name || matchInterRace.distance})`,
-            pace: pace(gp * 0.95),
+            pace: pace(calibratedGP * 0.95),
             done: false,
             intermediate: true
           });
@@ -171,23 +183,37 @@ function makePlan(p) {
           let isLongRun = i === slots.length - 1;
           let d = long;
           let type = 'Long easy run';
+          let sessionPace = pace(calibratedGP * 1.18); // Dynamic Zone 2 Easy Pace
 
           if (!isLongRun) {
             if (i === 0) {
-              d = Math.round(Math.max(4.0, Math.min(8.0, midweekTotal * 0.24)) * 2) / 2;
+              d = Math.round(Math.max(4.0, Math.min(8.0, midweekTotal * 0.22)) * 2) / 2;
               type = 'Recovery run';
+              sessionPace = pace(calibratedGP * 1.25); // Dynamic Recovery Pace
             } else if (i === 1) {
-              d = Math.round(Math.max(5.0, Math.min(12.0, midweekTotal * 0.28)) * 2) / 2;
-              type = 'Steady / tempo';
+              let isIntervalWeek = w % 2 === 1;
+              if (isIntervalWeek) {
+                d = Math.round(Math.max(6.0, Math.min(10.0, midweekTotal * 0.26)) * 2) / 2;
+                type = 'Intervals (Speed)';
+                sessionPace = pace(calibratedGP * 0.88); // Dynamic VO2max Pace (~12% faster than GP)
+              } else {
+                d = Math.round(Math.max(6.0, Math.min(12.0, midweekTotal * 0.28)) * 2) / 2;
+                type = 'Steady / tempo';
+                sessionPace = pace(calibratedGP * 0.96); // Dynamic Threshold Pace (~4% faster than GP)
+              }
             } else {
-              let usedMidweek = (Math.round(Math.max(4.0, Math.min(8.0, midweekTotal * 0.24)) * 2) / 2) + 
-                                (Math.round(Math.max(5.0, Math.min(12.0, midweekTotal * 0.28)) * 2) / 2);
+              let usedMidweek = (Math.round(Math.max(4.0, Math.min(8.0, midweekTotal * 0.22)) * 2) / 2) + 
+                                (Math.round(Math.max(6.0, Math.min(12.0, midweekTotal * 0.28)) * 2) / 2);
               d = Math.round(Math.max(5.0, midweekTotal - usedMidweek) * 2) / 2;
               type = 'Easy run';
+              sessionPace = pace(calibratedGP * 1.18);
             }
           }
 
-          if (left === 1 && !isLongRun) type = 'Easy shakeout';
+          if (left === 1 && !isLongRun) {
+            type = 'Easy shakeout';
+            sessionPace = pace(calibratedGP * 1.22);
+          }
 
           schedule.push({
             id: uid(),
@@ -195,7 +221,7 @@ function makePlan(p) {
             week: w + 1,
             km: d,
             type,
-            pace: pace(gp * (type.includes('tempo') ? 0.96 : type.includes('Recovery') ? 1.18 : 1.12)),
+            pace: sessionPace,
             done: false
           });
         }
@@ -205,7 +231,6 @@ function makePlan(p) {
 
   schedule.push({ id: uid(), date: p.raceDate, week: weeks, km, type: 'GOAL RACE DAY', pace: pace(gp), done: false, race: true });
 
-  // STRICT CHRONOLOGICAL SORT BY DATE
   schedule.sort((a, b) => a.date.localeCompare(b.date));
 
   return { ...p, schedule, weeks, goalPace: gp };
@@ -331,14 +356,14 @@ function App() {
     }
 
     if (modal === 'editPlan' && plan) {
-      let updated = makePlan({ ...plan, ...form });
+      let updated = makePlan({ ...plan, ...form }, state.runs);
       S(s => ({
         ...s,
         plans: s.plans.map(p => p.id === plan.id ? updated : p)
       }));
       N('Plan updated successfully.');
     } else {
-      let p = makePlan({ ...form, id: uid() });
+      let p = makePlan({ ...form, id: uid() }, state.runs);
       S(s => ({ ...s, plans: [p, ...s.plans], activePlanId: p.id }));
       T('Plan');
       N('Your suggested plan is ready.');
@@ -349,7 +374,7 @@ function App() {
   function deletePlan(idToDelete) {
     let targetId = idToDelete || plan?.id;
     if (!targetId) return;
-    let targetPlan = state.plans.find(p => p.id === targetId);
+    let targetPlan = state.plans.find(p => p.id !== targetId);
 
     if (confirm(`Are you sure you want to delete "${targetPlan?.name || 'this plan'}"?`)) {
       S(s => {
@@ -516,7 +541,7 @@ function App() {
             <div className="empty">
               <div className="emptyicon"><Footprints size={38}/></div>
               <small className="eyebrow">YOUR NEXT CHAPTER</small>
-              <h2>Every finish line starts somewhere.</h2>
+              長<h2>Every finish line starts somewhere.</h2>
               <p>Create a running goal and Stride will map out a simple training schedule for you.</p>
               <button className="btn primary" onClick={openNewPlan}><Plus size={16}/> Create your first plan</button>
               <small className="subtle">No subscriptions. No account. Just your running journey.</small>
