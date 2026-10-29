@@ -108,7 +108,7 @@ function predictRaceTimes(runs) {
   return { results, baseline: bestRun };
 }
 
-// GENERATOR: INCLUDES ALL DAYS OF CURRENT WEEK (NO PAST-DAY TRUNCATION FOR CURRENT WEEK)
+// GENERATOR WITH AUTOMATIC LOGGED RUN DATE SYNC
 function makePlan(p, userRuns = [], existingSchedule = []) {
   let km = KM[p.distance] || 42.195,
       race = new Date(p.raceDate + 'T12:00:00'),
@@ -128,7 +128,10 @@ function makePlan(p, userRuns = [], existingSchedule = []) {
       gp = parseTime(p.goalTime) / km,
       schedule = [];
 
-  // Map existing completed session status so completed status is preserved on rebuild
+  // Track dates with logged runs from user's history
+  let loggedDates = new Set(userRuns.map(r => r.date));
+
+  // Also retain manual checkbox states from previous schedule if available
   let doneStateMap = new Map();
   if (Array.isArray(existingSchedule)) {
     existingSchedule.forEach(s => {
@@ -181,8 +184,8 @@ function makePlan(p, userRuns = [], existingSchedule = []) {
       date.setDate(monday.getDate() + w * 7 + dayOffset);
       let ds = date.toISOString().slice(0, 10);
       
-      // INCLUDE ALL DATES FROM MONDAY OF CURRENT WEEK ONWARDS
       if (ds < p.raceDate) {
+        let isDone = loggedDates.has(ds) || doneStateMap.get(ds) || false;
         let matchInterRace = interRaces.find(r => r.date === ds);
 
         if (matchInterRace) {
@@ -194,7 +197,7 @@ function makePlan(p, userRuns = [], existingSchedule = []) {
             km: raceKm,
             type: `🏆 TUNE-UP RACE (${matchInterRace.name || matchInterRace.distance})`,
             pace: pace(calibratedGP * 0.95),
-            done: doneStateMap.get(ds) || false,
+            done: isDone,
             intermediate: true
           });
           insertedDates.add(ds);
@@ -241,7 +244,7 @@ function makePlan(p, userRuns = [], existingSchedule = []) {
             km: d,
             type,
             pace: sessionPace,
-            done: doneStateMap.get(ds) || false
+            done: isDone
           });
           insertedDates.add(ds);
         }
@@ -249,7 +252,7 @@ function makePlan(p, userRuns = [], existingSchedule = []) {
     });
   }
 
-  // GUARANTEE TUNE-UP RACES ARE INJECTED
+  // GUARANTEE TUNE-UP RACES INJECTION
   interRaces.forEach(r => {
     if (r.date && r.date < p.raceDate && !insertedDates.has(r.date)) {
       let rDate = new Date(r.date + 'T12:00:00');
@@ -262,7 +265,7 @@ function makePlan(p, userRuns = [], existingSchedule = []) {
         km: raceKm,
         type: `🏆 TUNE-UP RACE (${r.name || r.distance})`,
         pace: pace(calibratedGP * 0.95),
-        done: doneStateMap.get(r.date) || false,
+        done: loggedDates.has(r.date) || doneStateMap.get(r.date) || false,
         intermediate: true
       });
     }
@@ -275,7 +278,7 @@ function makePlan(p, userRuns = [], existingSchedule = []) {
     km, 
     type: 'GOAL RACE DAY', 
     pace: pace(gp), 
-    done: doneStateMap.get(p.raceDate) || false, 
+    done: loggedDates.has(p.raceDate) || doneStateMap.get(p.raceDate) || false, 
     race: true 
   });
 
@@ -329,8 +332,11 @@ function App() {
         return d >= start && d <= n;
       }).reduce((s, r) => s + Number(r.distance), 0),
       
-      done = plan?.schedule?.filter(s => s.done).length || 0,
-      upcoming = plan?.schedule?.filter(s => !s.done && s.date >= today()).slice(0, 4) || [],
+      // Calculate done by checking schedule done OR matching run log date
+      loggedDatesSet = useMemo(() => new Set(state.runs.map(r => r.date)), [state.runs]),
+      
+      done = plan?.schedule?.filter(s => s.done || loggedDatesSet.has(s.date)).length || 0,
+      upcoming = plan?.schedule?.filter(s => !(s.done || loggedDatesSet.has(s.date)) && s.date >= today()).slice(0, 4) || [],
       predictions = useMemo(() => predictRaceTimes(state.runs), [state.runs]);
 
   const weeksGrouped = useMemo(() => {
@@ -338,10 +344,13 @@ function App() {
     return plan.schedule.reduce((acc, item) => {
       let w = item.week || 1;
       if (!acc[w]) acc[w] = [];
-      acc[w].push(item);
+      
+      // Override done flag dynamically if present in run log
+      let isCompleted = item.done || loggedDatesSet.has(item.date);
+      acc[w].push({ ...item, done: isCompleted });
       return acc;
     }, {});
-  }, [plan]);
+  }, [plan, loggedDatesSet]);
 
   function toggleWeekExpand(wNum) {
     setExpandedWeeks(prev => ({ ...prev, [wNum]: !prev[wNum] }));
@@ -448,14 +457,45 @@ function App() {
     }
   }
 
+  // TOGGLE WITH BIDIRECTIONAL LOG SYNC
   function toggle(id) {
-    S(s => ({
-      ...s,
-      plans: s.plans.map(p => p.id !== plan.id ? p : {
+    if (!plan) return;
+    let session = plan.schedule.find(x => x.id === id);
+    if (!session) return;
+
+    let isCurrentlyDone = session.done || loggedDatesSet.has(session.date);
+    let newDoneState = !isCurrentlyDone;
+
+    S(s => {
+      let updatedPlans = s.plans.map(p => p.id !== plan.id ? p : {
         ...p,
-        schedule: p.schedule.map(x => x.id === id ? { ...x, done: !x.done } : x)
-      })
-    }));
+        schedule: p.schedule.map(x => x.id === id ? { ...x, done: newDoneState } : x)
+      });
+
+      let updatedRuns = [...s.runs];
+      if (newDoneState) {
+        // Auto-log run if checking as done and not yet in run log
+        if (!updatedRuns.some(r => r.date === session.date)) {
+          updatedRuns.unshift({
+            id: uid(),
+            date: session.date,
+            distance: session.km,
+            duration: '',
+            pace: session.pace,
+            notes: session.type
+          });
+        }
+      } else {
+        // Remove from run log if manually unchecked
+        updatedRuns = updatedRuns.filter(r => r.date !== session.date);
+      }
+
+      return {
+        ...s,
+        plans: updatedPlans,
+        runs: updatedRuns
+      };
+    });
   }
 
   function openRun(r) {
@@ -480,7 +520,19 @@ function App() {
       pace: run.pace || (Number.isFinite(secs) ? pace(secs / d) : ''),
       notes: run.notes
     };
-    S(s => ({ ...s, runs: editing ? s.runs.map(r => r.id === editing ? obj : r) : [obj, ...s.runs] }));
+
+    S(s => {
+      let updatedRuns = editing ? s.runs.map(r => r.id === editing ? obj : r) : [obj, ...s.runs];
+      
+      // Auto-sync plan schedule items on that date to done: true
+      let updatedPlans = s.plans.map(p => ({
+        ...p,
+        schedule: p.schedule.map(x => x.date === obj.date ? { ...x, done: true } : x)
+      }));
+
+      return { ...s, runs: updatedRuns, plans: updatedPlans };
+    });
+
     M('');
     N('Run saved.');
   }
