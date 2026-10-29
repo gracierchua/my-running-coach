@@ -71,7 +71,15 @@ const KEY = 'stride-running-coach-v1',
 
 function load() {
   try {
-    return { ...fresh(), ...JSON.parse(localStorage.getItem(KEY) || '{}') };
+    let data = JSON.parse(localStorage.getItem(KEY) || '{}');
+    // Clean up any legacy invalid duration strings like '1900-01-01'
+    if (Array.isArray(data.runs)) {
+      data.runs = data.runs.map(r => ({
+        ...r,
+        duration: (r.duration && !r.duration.includes('1900')) ? r.duration : ''
+      }));
+    }
+    return { ...fresh(), ...data };
   } catch {
     return fresh();
   }
@@ -342,7 +350,6 @@ function App() {
         if (loggedRun) {
           let dist = Number(loggedRun.distance);
           let pVal = loggedRun.pace || pace(parseTime(loggedRun.duration) / dist);
-          // Preserve the planned session type so color-coding remains intact even when logged!
           weekSessions.push({
             ...ps,
             km: dist,
@@ -586,7 +593,7 @@ function App() {
 
   function openRun(r) {
     E(r?.id || null);
-    R(r ? { date: r.date, distance: String(r.distance), duration: r.duration || '', pace: r.pace || '', hr: r.hr || '', notes: r.notes || '' } : { date: today(), distance: '', duration: '', pace: '', hr: '', notes: '' });
+    R(r ? { date: r.date, distance: String(r.distance), duration: (r.duration && !r.duration.includes('1900')) ? r.duration : '', pace: r.pace || '', hr: r.hr || '', notes: r.notes || '' } : { date: today(), distance: '', duration: '', pace: '', hr: '', notes: '' });
     M('run');
   }
 
@@ -602,7 +609,7 @@ function App() {
       id: editing || uid(),
       date: run.date,
       distance: d,
-      duration: run.duration,
+      duration: (run.duration && !run.duration.includes('1900')) ? run.duration : '',
       pace: run.pace || (Number.isFinite(secs) ? pace(secs / d) : ''),
       hr: run.hr ? Number(run.hr) : '',
       notes: run.notes
@@ -824,7 +831,7 @@ function App() {
                     <div className="recent" key={r.id}>
                       <div className="roundicon"><Footprints size={17}/></div>
                       <div><b>{r.distance} km run</b><small>{fmt(r.date)}{r.pace ? ' · ' + r.pace + '/km' : ''}{r.hr ? ' · ' + r.hr + ' bpm' : ''}</small></div>
-                      <strong>{r.duration || 'Logged'}</strong>
+                      <strong>{(r.duration && !r.duration.includes('1900')) ? r.duration : 'Logged'}</strong>
                     </div>
                   )) : <p className="muted">Your first run is waiting to be logged.</p>}
                   <button className="btn secondary full" onClick={() => openRun()}><Plus size={15}/> Log a run</button>
@@ -1007,7 +1014,7 @@ function App() {
                             <td>{fmt(r.date, { day: 'numeric', month: 'short', year: 'numeric' })}</td>
                             <td><b>🏃 Run</b>{r.notes && <small className="notes">{r.notes}</small>}</td>
                             <td>{Number(r.distance).toFixed(2)} km</td>
-                            <td>{r.duration || '—'}</td>
+                            <td>{(r.duration && !r.duration.includes('1900')) ? r.duration : '—'}</td>
                             <td>{r.pace ? r.pace + '/km' : '—'}</td>
                             <td>{r.hr ? r.hr + ' bpm' : '—'}</td>
                             <td>
