@@ -38,6 +38,22 @@ const KEY = 'stride-running-coach-v1',
         }
         return `${m}:${String(s).padStart(2, '0')}`;
       },
+
+      // Color mapper for workout types
+      getWorkoutBadgeStyle = type => {
+        let lower = String(type || '').toLowerCase();
+        if (lower.includes('race')) {
+          return { bg: 'rgba(204, 255, 0, 0.2)', border: '#ccff00', color: '#ccff00' };
+        }
+        if (lower.includes('long')) {
+          return { bg: 'rgba(147, 51, 234, 0.25)', border: '#a855f7', color: '#c084fc' };
+        }
+        if (lower.includes('tempo') || lower.includes('steady') || lower.includes('interval')) {
+          return { bg: 'rgba(217, 119, 6, 0.25)', border: '#f59e0b', color: '#fbbf24' };
+        }
+        // Default Easy Run / Shakeout
+        return { bg: 'rgba(2, 132, 199, 0.25)', border: '#0284c7', color: '#38bdf8' };
+      },
       
       fresh = () => ({ plans: [], runs: [], activePlanId: null });
 
@@ -185,7 +201,6 @@ function App() {
       upcoming = plan?.schedule?.filter(s => !s.done && s.date >= today()).slice(0, 4) || [],
       predictions = useMemo(() => predictRaceTimes(state.runs), [state.runs]);
 
-  // Group plan schedule by weeks
   const weeksGrouped = useMemo(() => {
     if (!plan?.schedule) return {};
     return plan.schedule.reduce((acc, item) => {
@@ -514,7 +529,7 @@ function App() {
                 </div>
               </div>
 
-              {/* WEEKLY CARD CONTAINER OVERVIEW */}
+              {/* WEEKLY CARD CONTAINER WITH MULTI-COLOR ACCENTS */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 {Object.entries(weeksGrouped).map(([weekNum, sessions]) => {
                   let isExpanded = expandedWeeks[weekNum] ?? (Number(weekNum) === 1);
@@ -529,9 +544,10 @@ function App() {
                       key={weekNum} 
                       style={{ 
                         background: '#121614', 
-                        border: isWeekComplete ? '2px solid #ccff00' : '1px solid rgba(255,255,255,0.1)', 
+                        border: isWeekComplete ? '2px solid #ccff00' : isExpanded ? '2px solid #38bdf8' : '1px solid rgba(255,255,255,0.1)', 
                         borderRadius: '16px', 
                         padding: '20px',
+                        boxShadow: isExpanded ? '0 8px 24px rgba(0,0,0,0.4)' : 'none',
                         transition: 'all 0.2s ease'
                       }}
                     >
@@ -543,9 +559,13 @@ function App() {
                         <div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                             <h3 style={{ fontSize: '1.35rem', fontWeight: 700, margin: 0, color: '#f4f4f5' }}>Week {weekNum}</h3>
-                            {isWeekComplete && (
+                            {isWeekComplete ? (
                               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#ccff00', color: '#090a09', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 700 }}>
                                 <CheckCircle2 size={13}/> COMPLETE
+                              </span>
+                            ) : (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 600 }}>
+                                IN PROGRESS
                               </span>
                             )}
                           </div>
@@ -553,7 +573,7 @@ function App() {
                           {/* WORKOUTS & DISTANCE SUMMARY BARS */}
                           <div style={{ display: 'flex', gap: '24px', marginTop: '10px', color: '#a1a1aa', fontSize: '0.85rem' }}>
                             <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <Footprints size={15} style={{ color: '#ccff00' }}/> 
+                              <Footprints size={15} style={{ color: '#38bdf8' }}/> 
                               WORKOUTS: <strong style={{ color: '#f4f4f5' }}>{weekDoneCount}/{sessions.length}</strong>
                             </span>
                             <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -573,47 +593,62 @@ function App() {
                       {/* DAILY WORKOUT LIST (WHEN EXPANDED) */}
                       {isExpanded && (
                         <div style={{ marginTop: '20px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                          {sessions.map(s => (
-                            <div 
-                              key={s.id}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                background: s.done ? 'rgba(204,255,0,0.05)' : 'rgba(255,255,255,0.02)',
-                                padding: '12px 16px',
-                                borderRadius: '10px',
-                                border: s.done ? '1px solid rgba(204,255,0,0.2)' : '1px solid transparent'
-                              }}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '16px', minWidth: '120px' }}>
-                                <span style={{ color: '#a1a1aa', fontWeight: 600, fontSize: '0.85rem', width: '36px' }}>
-                                  {fmt(s.date, { weekday: 'short' })}
-                                </span>
-                                <span style={{ fontWeight: 700, fontSize: '0.95rem', color: '#f4f4f5' }}>
-                                  {fmt(s.date, { day: 'numeric', month: 'short' })}
-                                </span>
-                              </div>
+                          {sessions.map(s => {
+                            let badgeStyle = getWorkoutBadgeStyle(s.type);
 
-                              <div style={{ flex: 1, padding: '0 16px' }}>
-                                <b style={{ fontSize: '0.95rem', color: s.race ? '#ccff00' : '#f4f4f5' }}>{s.type}</b>
-                                <small style={{ display: 'block', color: '#71717a', fontSize: '0.78rem' }}>
-                                  {s.race ? 'Race event day' : `Target Pace: ${s.pace}/km`}
-                                </small>
-                              </div>
-
-                              <div style={{ paddingRight: '20px', textAlign: 'right' }}>
-                                <b style={{ fontSize: '1rem', color: '#ccff00' }}>{s.km} km</b>
-                              </div>
-
-                              <button 
-                                className={'check ' + (s.done ? 'checked' : '')} 
-                                onClick={() => toggle(s.id)}
+                            return (
+                              <div 
+                                key={s.id}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justify: 'space-between',
+                                  background: s.done ? 'rgba(204,255,0,0.05)' : 'rgba(255,255,255,0.02)',
+                                  padding: '12px 16px',
+                                  borderRadius: '10px',
+                                  border: s.done ? '1px solid rgba(204,255,0,0.3)' : '1px solid rgba(255,255,255,0.05)'
+                                }}
                               >
-                                {s.done ? <Check size={15}/> : ''}
-                              </button>
-                            </div>
-                          ))}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', minWidth: '120px' }}>
+                                  <span style={{ color: '#a1a1aa', fontWeight: 600, fontSize: '0.85rem', width: '36px' }}>
+                                    {fmt(s.date, { weekday: 'short' })}
+                                  </span>
+                                  <span style={{ fontWeight: 700, fontSize: '0.95rem', color: '#f4f4f5' }}>
+                                    {fmt(s.date, { day: 'numeric', month: 'short' })}
+                                  </span>
+                                </div>
+
+                                <div style={{ flex: 1, padding: '0 16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                  <span style={{
+                                    background: badgeStyle.bg,
+                                    border: `1px solid ${badgeStyle.border}`,
+                                    color: badgeStyle.color,
+                                    padding: '4px 10px',
+                                    borderRadius: '8px',
+                                    fontWeight: 700,
+                                    fontSize: '0.82rem',
+                                    letterSpacing: '0.02em'
+                                  }}>
+                                    {s.type}
+                                  </span>
+                                  <small style={{ color: '#71717a', fontSize: '0.78rem' }}>
+                                    {s.race ? 'Race event day' : `Target Pace: ${s.pace}/km`}
+                                  </small>
+                                </div>
+
+                                <div style={{ paddingRight: '20px', textAlign: 'right' }}>
+                                  <b style={{ fontSize: '1rem', color: badgeStyle.color }}>{s.km} km</b>
+                                </div>
+
+                                <button 
+                                  className={'check ' + (s.done ? 'checked' : '')} 
+                                  onClick={() => toggle(s.id)}
+                                >
+                                  {s.done ? <Check size={15}/> : ''}
+                                </button>
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
