@@ -212,7 +212,7 @@ footer b{color:var(--lime)}
   z-index: 999;
   justify-content: space-around;
   align-items: center;
-  padding: 20px 8px calc (12px + env(safe-area-inset-bottom)) 12px;
+  padding: 18px 8px;
   padding-bottom: env(safe-area-inset-bottom);
 }
 
@@ -228,7 +228,7 @@ footer b{color:var(--lime)}
   font-weight: 600;
   cursor: pointer;
   flex: 1;
-  padding: 8px 0;
+  padding: 12px 0;
   transition: color 0.15s ease;
 }
 
